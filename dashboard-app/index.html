@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <title>Codex Screener</title>
+  <link rel="stylesheet" href="./assets/app.css">
+</head>
+<body>
+  <p id="app-status" role="status">Loading stored dashboard data…</p>
+  <section id="codex-screener" aria-label="Codex Screener research dashboard">
+
+
+
+<header class="me-header"><div class="me-header-context"><div class="me-sub" id="me-run-meta"></div><div class="me-mode">CONDITIONAL THESIS · conviction is not probability</div><div class="me-product-mode" id="me-product-mode" aria-label="Dashboard density"></div><select id="me-replay" hidden aria-label="Replay published run"></select></div><div class="me-consensus-pulse" id="me-consensus-pulse"></div></header>
+<div class="me-alert" id="me-alert" role="alert"></div>
+<div class="me-freshness-strip" id="me-freshness" aria-label="Selected stock dataset freshness"></div>
+<section class="me-system" aria-label="Market and data status"><div class="me-scope-head"><span class="me-scope-name">MARKET CONTEXT</span><span class="me-muted">applies to every ticker</span></div><div class="me-system-status" id="me-system-status"></div><div class="me-macro" id="me-macro" aria-label="Market context"></div></section>
+<section class="me-watchboard" aria-label="Watchlist decisions"><div class="me-scope-head"><span class="me-scope-name">WATCHLIST DECISIONS</span><span class="me-muted">cross-stock comparison</span></div><div class="me-watch-head"><h2>Ranked theses</h2><div class="me-watch-controls" id="me-watch-controls" aria-label="Watchlist view"></div></div><div id="me-watch-ranking"><section class="me-ranking" aria-label="Directional evidence ranking"><div class="me-rank-list" id="me-ranking"></div></section></div><div id="me-watch-map" hidden><section class="me-map" aria-label="Cross-ticker opportunity map"><div class="me-map-head"><h2>Opportunity map</h2><span class="me-muted">evidence quality → · thesis evidence ↑ · size = tradeability</span></div><div class="me-map-wrap" id="me-map-wrap"><svg class="me-map-svg" id="me-map-svg" role="img" aria-label="Watchlist evidence quality and thesis evidence map"></svg><div class="me-map-tip" id="me-map-tip" role="tooltip"></div></div></section></div><div class="me-watch-alerts" id="me-watch-alerts" hidden></div></section>
+<section class="me-stock" aria-label="Selected stock analysis"><div class="me-scope-head"><span class="me-scope-name" id="me-stock-scope">SELECTED STOCK</span><span class="me-muted">ticker-specific evidence</span></div><section class="me-focus" aria-label="Selected ticker analysis">
+    <div class="me-focus-head"><div><h2 id="me-selected-title"></h2><div class="me-selected-price" id="me-selected-price"></div></div><button type="button" class="me-ask" id="me-ask">Stress-test with Codex</button></div>
+    <div class="me-outlook" id="me-outlook"></div>
+    <div class="me-thesis" id="me-thesis" aria-label="Selected directional thesis summary"></div>
+    <section class="me-intel" id="me-intel" aria-label="News catalyst, unusual flow alert, and forecast explanation"></section>
+    <div class="me-decision-tools"><section class="me-change" aria-label="Daily score changes"><div class="me-tool-head"><h2>Daily score change</h2><span class="me-muted">supportive input = green</span></div><div class="me-change-body" id="me-change"></div></section><section class="me-ladder" aria-label="Price decision ladder"><div class="me-tool-head"><h2>Price decision ladder</h2><span class="me-muted">stored references</span></div><div class="me-ladder-wrap" id="me-ladder-wrap"><svg class="me-ladder-svg" id="me-ladder-svg" role="img" aria-label="Selected ticker price, model range, implied range, and positioning levels"></svg><div class="me-map-tip" id="me-ladder-tip" role="tooltip"></div></div></section></div>
+    <div class="me-controls"><div class="me-control-group" id="me-views" aria-label="Chart view"></div><div class="me-control-group" id="me-ranges" aria-label="Chart range"></div><div class="me-control-group" id="me-series" aria-label="Chart series"></div></div>
+    <div class="me-quote" id="me-quote" aria-live="polite"></div>
+    <div class="me-levels" id="me-levels" aria-label="Positioning price levels"></div>
+    <div class="me-chart-wrap" id="me-chart-wrap"><svg class="me-chart" id="me-chart" role="img" aria-label="Price history with moving averages and positioning references"></svg><div class="me-tooltip" id="me-tooltip" role="tooltip"></div></div>
+    <section class="me-stock-timeline" id="me-stock-timeline" aria-label="Selected stock forecast record"></section>
+    <section class="me-derivatives" id="me-derivatives" aria-label="GEX, unusual flow, option strike, and supporting context"></section>
+  </section><div class="me-edge" id="me-edge" aria-label="Selected stock evidence profile"></div><div class="me-stock-record me-details" id="me-stock-record"></div><div class="me-details" id="me-details"></div></section>
+<section class="me-performance" aria-label="Model results"><div class="me-scope-head"><span class="me-scope-name">MODEL RESULTS</span><span class="me-muted">all tickers · frozen forecasts</span></div><section class="me-eval" id="me-evaluation" aria-label="Out-of-sample model accountability"></section><section class="me-tracking" id="me-tracking" aria-label="Forecast result tracking"></section><div class="me-platform-details me-details" id="me-platform-details"></div></section>
+<nav class="me-mobile-nav" aria-label="Ticker navigation"><button type="button" id="me-prev" aria-label="Previous ticker">←</button><button type="button" id="me-current-ticker"></button><button type="button" id="me-next" aria-label="Next ticker">→</button></nav>
+
+</section>
+  <script src="./assets/app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Compile Python
+        run: python -m compileall -q src scripts tests
+      - name: Run tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -v
+      - name: Check dashboard JavaScript
+        run: node --check dashboard-app/assets/app.js
+      - name: Build and validate public release
+        run: python scripts/build_public_release.py --output "${RUNNER_TEMP}/codex-screener-public"
+      - name: Test clean public release
+        working-directory: ${{ runner.temp }}/codex-screener-public
+        run: |
+          python -m compileall -q src scripts tests
+          PYTHONPATH=src python -m unittest discover -s tests -v
+          node --check dashboard-app/assets/app.js
+          python scripts/build_demo_dataset.py

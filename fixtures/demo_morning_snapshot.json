@@ -1,0 +1,24 @@
+{
+  "fixture_version": 1,
+  "purpose": "Synthetic local demo only. It is not market data and must not support a trading decision.",
+  "snapshots": [
+    {
+      "provider": "fixture",
+      "dataset": "equity_quote",
+      "symbol": "QCOM",
+      "as_of": "2026-08-19T16:00:00-04:00",
+      "retrieved_at": "2026-08-20T06:55:00-04:00",
+      "payload": {"last": 165.8, "currency": "USD"},
+      "metadata": {"quality": "incomplete", "reason": "synthetic fixture"}
+    },
+    {
+      "provider": "fixture",
+      "dataset": "equity_quote",
+      "symbol": "INTC",
+      "as_of": "2026-08-19T16:00:00-04:00",
+      "retrieved_at": "2026-08-20T06:55:00-04:00",
+      "payload": {"last": 24.1, "currency": "USD"},
+      "metadata": {"quality": "incomplete", "reason": "synthetic fixture"}
+    }
+  ]
+}
