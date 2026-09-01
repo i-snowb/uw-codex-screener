@@ -1,5 +1,5 @@
 # Codex Screener
-
+<img width="1234" height="604" alt="image" src="https://github.com/user-attachments/assets/82054d4d-c18a-42c5-8a1b-47a34eb6a1e4" />
 Codex Screener is a local, reproducible research workflow for a user-defined
 options watchlist. It is decision support, not investment advice. Network access
 is explicit and read-only. The live morning command collects bounded provider
@@ -83,7 +83,6 @@ python3 scripts/serve_dashboard.py --root /tmp/codex-screener-demo
 ```
 
 ## Dashboard formats
-
 The generated dashboard has two supported formats. `dashboard-app/` is the
 stable local architecture. It separates code from immutable daily JSON and is
 the primary format for development. `artifacts/portable/` contains the same
@@ -115,7 +114,7 @@ selector. Each immutable publication is indexed in
 decision state. Research view exposes model, provenance, and signal detail.
 
 ## Intraday conditioning
-
+<img width="1233" height="688" alt="image" src="https://github.com/user-attachments/assets/d398168a-7df5-487e-8c66-300fb920068f" />
 The local app can refresh selected provider evidence during an open NYSE
 session. The daily rank, thesis, V3/V4 paths, agent analysis, and evaluation
 origin stay frozen. Fresh price and persistent Greek-flow evidence update a
@@ -159,7 +158,7 @@ once per ticker. Short-interest, borrow, and short-volume datasets can be
 selected for a lower-frequency weekly refresh.
 
 ## Historical backfill
-
+<img width="1219" height="691" alt="image" src="https://github.com/user-attachments/assets/e930556f-6067-404f-a8bd-f654afd0e543" />
 The historical collector is an append-only, raw-response framework. It is
 dry-run by default and needs an explicit `--live --audit-accepted` after the
 provider audit. It has a hard logical-item cap plus a retry-aware transport
