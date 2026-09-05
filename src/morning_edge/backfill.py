@@ -140,7 +140,7 @@ class BackfillPlan:
             "schema_policy": "raw_response_only; no field mapping or derived analytics",
             "dataset_parameters": {
                 "ohlc": {
-                    "timeframe": "1Y",
+                    "timeframe": "2Y",
                     "limit": 2500,
                     "anchor": "plan_end_date",
                     "provider_end_date_offset_days": -1,
@@ -294,6 +294,31 @@ class BackfillStore:
         ).fetchall()
         return {str(row["item_key"]): CoverageState(row["state"]) for row in rows}
 
+    def reusable_terminal_evidence(
+        self, item: BackfillItem
+    ) -> tuple[CoverageState, int, str] | None:
+        """Find completed evidence for the same provider scope in another plan."""
+
+        if item.requested_date is None:
+            return None
+        dataset = BACKFILL_DATASETS[item.dataset].snapshot_dataset.value
+        row = self._snapshots.connection.execute(
+            """SELECT e.state, e.snapshot_id, e.plan_id
+               FROM backfill_events e
+               JOIN snapshots s ON s.id = e.snapshot_id
+               WHERE s.provider = 'unusual_whales'
+                 AND s.dataset = ?
+                 AND s.symbol = ?
+                 AND json_extract(s.metadata_json, '$.requested_market_date') = ?
+                 AND e.state IN ('collected', 'empty')
+               ORDER BY e.id DESC
+               LIMIT 1""",
+            (dataset, item.ticker, item.requested_date.isoformat()),
+        ).fetchone()
+        if row is None or row["snapshot_id"] is None:
+            return None
+        return CoverageState(row["state"]), int(row["snapshot_id"]), str(row["plan_id"])
+
     def events(self, item: BackfillItem) -> list[tuple[CoverageState, int | None, dict[str, Any]]]:
         """Read immutable progress events for one item in insertion order."""
 
@@ -329,7 +354,7 @@ class BackfillStore:
 def _call(client: HistoricalClient, item: BackfillItem) -> EndpointResponse:
     if item.dataset == "ohlc":
         return client.ohlc(
-            item.ticker, candle_size="1d", timeframe="1Y",
+            item.ticker, candle_size="1d", timeframe="2Y",
             end_date=item.requested_date - timedelta(days=1) if item.requested_date else None,
             limit=2500,
         )
@@ -1177,6 +1202,23 @@ def collect(
     states = event_store.latest_states(plan.plan_id)
     attempted = collected = empty = failures = 0
     for item in plan.items():
+        state = states.get(item.item_key, CoverageState.PLANNED)
+        if state in {CoverageState.COLLECTED, CoverageState.EMPTY, CoverageState.SCOPE_UNVERIFIED}:
+            continue
+        reusable = event_store.reusable_terminal_evidence(item)
+        if reusable is not None:
+            prior_state, snapshot_id, source_plan_id = reusable
+            event_store.record(
+                item,
+                prior_state,
+                snapshot_id=snapshot_id,
+                details={
+                    "reason": "reused_terminal_evidence_from_another_plan",
+                    "source_plan_id": source_plan_id,
+                },
+            )
+            states[item.item_key] = prior_state
+            continue
         if item.dataset == "flow_alerts":
             flow_result = _collect_flow_alert_pages(
                 client=client,
@@ -1224,9 +1266,6 @@ def collect(
             continue
         if attempted >= max_requests:
             break
-        state = states.get(item.item_key, CoverageState.PLANNED)
-        if state in {CoverageState.COLLECTED, CoverageState.EMPTY, CoverageState.SCOPE_UNVERIFIED}:
-            continue
         attempted += 1
         try:
             response = _call(client, item)

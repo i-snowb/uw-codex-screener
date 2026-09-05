@@ -4,6 +4,23 @@ Codex Screener derives research features from immutable raw snapshots. It does
 not convert these features into a trade instruction. Every daily artifact names
 the feature version, cutoff, and source snapshot IDs.
 
+## Correctness contract: edge-research-v3
+
+Flow history combines pages from one capture plan and requested session. It
+deduplicates alert IDs and excludes rows from adjacent dates. A session is
+complete only when its pagination-completion event was available by the cutoff.
+The current bounded feed is partial context, not a complete-session sample.
+Percentiles and z-scores require comparable complete-session coverage.
+
+An unverified empty response remains missing. A verified empty session can count
+as zero only inside the observed price-history window. This avoids treating
+pre-listing or unsupported history as neutral activity. Zero flow quality
+contributes exactly zero to positioning context.
+
+These corrections change research features. They do not demonstrate predictive
+alpha or calibrate probabilities. Reprocessed artifacts have a new identity,
+retain the original evidence cutoff, and cannot register prospective forecasts.
+
 ## Surface scores
 
 The dashboard keeps six dimensions separate:

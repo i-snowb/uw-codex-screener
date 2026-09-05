@@ -284,7 +284,16 @@ def _technical_view(reader: EvidenceReader, ticker: str, cutoff_at: datetime, ev
         "latest_regular_session": bars[-1].session_date.isoformat() if bars else None,
         "observations": len(bars),
         "bars": [
-            {"date": bar.session_date.isoformat(), "close": bar.close, "ema20": ema20[index], "ema50": ema50[index]}
+            {
+                "date": bar.session_date.isoformat(),
+                "open": bar.open,
+                "high": bar.high,
+                "low": bar.low,
+                "close": bar.close,
+                "volume": bar.volume,
+                "ema20": ema20[index],
+                "ema50": ema50[index],
+            }
             for index, bar in enumerate(bars)
         ],
         "return_1d_pct": return_1d * 100 if return_1d is not None else None,

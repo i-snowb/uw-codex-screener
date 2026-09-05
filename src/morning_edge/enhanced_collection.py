@@ -14,7 +14,7 @@ from enum import StrEnum
 from typing import Any, Protocol
 
 from .models import Dataset, SnapshotEnvelope
-from .providers.base import ProviderError
+from .providers.base import CollectionCircuit, ProviderError
 from .providers.budget import WeeklyRequestBudget
 from .providers.unusual_whales import EndpointResponse
 from .store import SnapshotStore
@@ -374,12 +374,20 @@ def collect_enhanced(
         )
 
     results: list[EnhancedCaptureItem] = []
+    circuit = CollectionCircuit()
     for dataset, planned_symbol in planned:
         spec = SPECS[dataset]
         ticker = planned_symbol if spec.scope == "ticker" else None
         endpoint = spec.endpoint.format(ticker=ticker or "")
+        if circuit.reason:
+            results.append(EnhancedCaptureItem(
+                dataset, planned_symbol, EnhancedCaptureStatus.UNAVAILABLE, endpoint,
+                None, None, None, circuit.reason,
+            ))
+            continue
         try:
             response = spec.collect(client, ticker)
+            circuit.success()
             count = _row_count(response)
             status = EnhancedCaptureStatus.CAPTURED if count else EnhancedCaptureStatus.EMPTY
             raw = response.response.raw
@@ -409,6 +417,7 @@ def collect_enhanced(
                 raw.fetched_at.astimezone(UTC).isoformat(), count,
             ))
         except (ProviderError, ValueError, OSError) as error:
+            circuit.failure(error)
             status = EnhancedCaptureStatus.SCHEMA_MISMATCH if error.__class__.__name__ == "ProviderSchemaError" else EnhancedCaptureStatus.UNAVAILABLE
             results.append(EnhancedCaptureItem(
                 dataset, planned_symbol, status, endpoint, None, None, None,

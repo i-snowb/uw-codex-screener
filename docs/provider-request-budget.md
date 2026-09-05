@@ -1,15 +1,15 @@
 # Provider request budget
 
 Codex Screener protects a local Unusual Whales request budget before every
-outbound HTTP transport attempt. The local policy has a **30,000-attempt cap**
-and a **20,000-attempt protected reserve**, leaving at most **10,000 attempts**
-for audit and historical collection.
+outbound HTTP transport attempt. The API Basic policy has a **40,000-attempt
+cap** and a **7,000-attempt protected reserve**, leaving at most **33,000
+attempts** for collection and analysis.
 
-The accounting window is a trailing **7 x 24-hour** period ending when usage is
-read or an attempt is reserved. This is deliberately more conservative than a
-calendar-week reset. It does **not** infer or claim the provider's subscription
-or billing reset. Provider headers are retained only as response metadata; they
-never reset, refund, or reconcile this local counter.
+The accounting window is a trailing **24-hour** period ending when usage is
+read or an attempt is reserved. This is conservative relative to a calendar-day
+reset and does **not** infer the provider's billing boundary. Provider headers
+are retained only as response metadata; they never reset, refund, or reconcile
+this local counter.
 
 Provider entitlements and reset schedules can change. Confirm the active plan
 in the provider account before changing these local limits. The local policy is
@@ -17,7 +17,7 @@ independent of the provider plan and does not increase an account entitlement.
 
 The budget charges immediately before the HTTP transport runs. Successful
 requests, HTTP errors, retry attempts, connection failures, and process failure
-after reservation all consume one local attempt. Once 10,000 local attempts are
+after reservation all consume one local attempt. Once 33,000 local attempts are
 inside the rolling window, later provider calls fail before a request is sent.
 
 The SQLite ledger uses the owner-private runtime root by default. Override it
@@ -54,7 +54,7 @@ PYTHONPATH=src python3 -m morning_edge.cli provider-baseline-adjust \
 
 Replaying an identical adjustment is idempotent and makes no provider request.
 The adjustment counts against the local reserve while its effective timestamp
-remains inside the trailing seven-day window.
+remains inside the trailing 24-hour window.
 
 ## Collection limits
 
@@ -67,10 +67,10 @@ before the run.
 
 Historical backfill has one explicit operator override:
 `--authorized-reserve-floor N`. It is accepted only with `--live` and
-`--audit-accepted`, applies only to that process, and must be between 0 and the
-normal 20,000-request reserve. The result records the authorized floor and
-whether the override was applied. Daily capture and later commands continue to
-use the normal reserve unless they receive separate explicit authorization.
+`--audit-accepted`, applies only to that process, and must be smaller than the
+40,000-request cap. The result records the authorized floor and whether it is
+below the normal 7,000-request reserve. Other commands continue to use the
+normal reserve unless they receive separate explicit authorization.
 
 Normal live CLI commands pass the same configured ledger into the provider
 client. A real `UnusualWhalesClient` now requires that explicit shared budget;

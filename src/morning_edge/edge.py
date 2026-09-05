@@ -8,7 +8,7 @@ keeps empirical analog frequencies separate from calibrated probabilities.
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 import json
 from math import erf, exp, isfinite, log, sqrt
@@ -23,7 +23,7 @@ from .clock import next_nyse_session
 from .models import timestamp_text, utc_timestamp
 
 
-EDGE_FEATURE_VERSION = "edge-research-v2"
+EDGE_FEATURE_VERSION = "edge-research-v3"
 ANALOG_MODEL_VERSION = "nearest-analog-v3"
 FORECAST_MODEL_VERSION = "analog-path-ensemble-v3"
 FORECAST_V4_MODEL_VERSION = "volatility-scaled-analog-ensemble-v4"
@@ -358,7 +358,7 @@ class EdgeAnalyzer:
         }
 
     @staticmethod
-    def _flow_summary(snapshot: RawSnapshot) -> dict[str, Any]:
+    def _flow_summary(snapshot: RawSnapshot, *, requested_session: date | None = None) -> dict[str, Any]:
         dated_rows: list[tuple[date, Mapping[str, Any]]] = []
         undated_rows: list[Mapping[str, Any]] = []
         for row in _rows(snapshot.payload):
@@ -378,7 +378,10 @@ class EdgeAnalyzer:
                 undated_rows.append(row)
             else:
                 dated_rows.append((observed_date, row))
-        if dated_rows:
+        if requested_session is not None:
+            market_date = requested_session
+            rows = [row for row_date, row in dated_rows if row_date == market_date]
+        elif dated_rows:
             market_date = max(item[0] for item in dated_rows)
             rows = [row for row_date, row in dated_rows if row_date == market_date]
         else:
@@ -419,28 +422,89 @@ class EdgeAnalyzer:
             "snapshot_id": snapshot.snapshot_id,
         }
 
-    def flow_conviction(self, ticker: str, cutoff_at: datetime) -> dict[str, Any]:
+    def flow_conviction(self, ticker: str, cutoff_at: datetime, *, first_price_session: str | None = None) -> dict[str, Any]:
         snapshots = self.snapshots(ticker, "option_flow", cutoff_at)
         if not snapshots:
             return {"status": "UNAVAILABLE", "history_sessions": 0, "source_snapshot_ids": []}
-        newest_by_provider_date: dict[str, dict[str, Any]] = {}
+        # Never mix separate captures or pagination plans into one observation.
+        cohorts: dict[tuple[str, ...], list[RawSnapshot]] = defaultdict(list)
         for snapshot in snapshots:
-            summary = self._flow_summary(snapshot)
+            meta = snapshot.metadata
+            key = (str(meta["backfill_plan_id"]), str(meta["backfill_item_key"])) if (
+                meta.get("pagination_family") == "flow_alert_cursor"
+                and meta.get("backfill_plan_id") and meta.get("backfill_item_key")
+            ) else (str(snapshot.snapshot_id),)
+            cohorts[key].append(snapshot)
+        has_events = self._connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='backfill_events'"
+        ).fetchone() is not None
+        newest_by_provider_date: dict[str, dict[str, Any]] = {}
+        for key, candidates in cohorts.items():
+            snapshot = candidates[0]
+            meta = snapshot.metadata
+            complete = False
+            selected = [snapshot]
+            if len(key) == 2:
+                pages: dict[int, RawSnapshot] = {}
+                for candidate in candidates:
+                    pages.setdefault(int(candidate.metadata.get("pagination_page", 0)), candidate)
+                selected = [pages[page] for page in sorted(pages)]
+                event = self._connection.execute(
+                    "SELECT state, details_json FROM backfill_events WHERE plan_id=? AND item_key=? "
+                    "AND julianday(recorded_at)<=julianday(?) ORDER BY id DESC LIMIT 1",
+                    (*key, timestamp_text(cutoff_at)),
+                ).fetchone() if has_events else None
+                details = json.loads(event["details_json"]) if event else {}
+                expected_pages = details.get("pages_captured", int(details.get("page", -1)) + 1)
+                complete = bool(event and event["state"] in {"collected", "empty"}
+                                and list(sorted(pages)) == list(range(expected_pages)))
+            elif meta.get("historical_scope_verified") is True:
+                complete = meta.get("pagination_status") == "verified_not_required"
+            identities: dict[str, Mapping[str, Any]] = {}
+            for page in selected:
+                for row in _rows(page.payload):
+                    identity = str(row.get("id") or row.get("alert_id") or json.dumps(row, sort_keys=True))
+                    identities.setdefault(identity, row)
+            requested_session = snapshot.market_date if len(key) == 2 or meta.get("historical_scope_verified") else None
+            summary = self._flow_summary(
+                replace(snapshot, payload={"data": list(identities.values())}),
+                requested_session=requested_session,
+            )
+            empty = summary["alert_count"] == 0
+            in_price_window = first_price_session is None or summary["market_date"] >= first_price_session
+            eligible = complete and in_price_window and (not empty or first_price_session is not None)
+            summary.update({
+                "source_snapshot_ids": sorted(page.snapshot_id for page in selected),
+                "coverage_status": "COMPLETE_SESSION" if complete else "PARTIAL_OR_UNVERIFIED",
+                "comparison_eligible": eligible,
+                "coverage_key": "full-session-unusual-false-v1" if complete else None,
+                "missing_reason": (
+                    "outside_observed_price_history" if not in_price_window else
+                    "empty_without_verified_session_coverage" if empty and not eligible else None
+                ),
+            })
+            if empty and not eligible:
+                summary.update(gross_premium=None, directional_premium=None, total_volume=None)
             newest_by_provider_date.setdefault(summary["market_date"], summary)
         history = [newest_by_provider_date[key] for key in sorted(newest_by_provider_date)]
         latest = dict(history[-1])
-        historical = [item["directional_premium"] for item in history[:-1]]
+        historical = [item["directional_premium"] for item in history[:-1]
+                      if item["comparison_eligible"] and item["coverage_key"] == latest["coverage_key"]]
+        comparable = latest["comparison_eligible"]
         zscore = None
-        if len(historical) >= 5 and pstdev(historical) > 0:
+        if comparable and len(historical) >= 5 and pstdev(historical) > 0:
             zscore = (latest["directional_premium"] - fmean(historical)) / pstdev(historical)
         quality = max(0.0, latest["opening_share"]) * max(0.0, latest["single_leg_share"])
         quality *= max(0.0, 1 - latest["multileg_share"])
         latest.update({
-            "status": "PROVISIONAL_UNCONFIRMED",
-            "history_sessions": len(history), "directional_percentile": _percentile(abs(latest["directional_premium"]), [abs(item) for item in historical]),
+            "status": "PROVISIONAL_UNCONFIRMED" if latest["alert_count"] else "EMPTY" if comparable else "UNAVAILABLE",
+            "history_sessions": len(history),
+            "comparable_history_sessions": len(historical),
+            "comparison_status": "COMPARABLE" if comparable and historical else "INSUFFICIENT_COMPARABLE_COVERAGE",
+            "directional_percentile": _percentile(abs(latest["directional_premium"]), [abs(item) for item in historical]) if comparable else None,
             "directional_zscore": zscore, "quality_multiplier": min(1.0, quality),
             "oi_confirmed": False, "oi_confirmation_ratio": None,
-            "history": history, "source_snapshot_ids": [item["snapshot_id"] for item in history],
+            "history": history, "source_snapshot_ids": sorted({value for item in history for value in item["source_snapshot_ids"]}),
             "method": "Ask-minus-bid call premium minus ask-minus-bid put premium; multi-leg ambiguity penalized",
         })
         return latest
@@ -1236,7 +1300,8 @@ class EdgeAnalyzer:
         elif gex.get("spot_regime") == "BELOW_FLIP":
             positioning -= 10
         if (share := _number(flow.get("directional_share"))) is not None:
-            positioning += max(-20.0, min(20.0, share * 20 * (_number(flow.get("quality_multiplier")) or 0.25)))
+            quality = _number(flow.get("quality_multiplier"))
+            positioning += max(-20.0, min(20.0, share * 20 * (quality if quality is not None else 0.0)))
 
         tradeability = 0.0
         if (spread := _number(surface.get("median_spread_pct"))) is not None:
@@ -1286,7 +1351,8 @@ class EdgeAnalyzer:
         adv = fmean(volumes) if volumes else None
         surface = self.option_surface(ticker, cutoff_at, spot=spot, bars=bars, realized_vol_20=realized)
         oi = self.oi_structure(ticker, cutoff_at, spot=spot)
-        flow = self.flow_conviction(ticker, cutoff_at)
+        price_sessions = [str(row.get("date"))[:10] for row in bars if row.get("date") and _number(row.get("close")) is not None]
+        flow = self.flow_conviction(ticker, cutoff_at, first_price_session=min(price_sessions) if price_sessions else None)
         gex = self.gex_topology(ticker, cutoff_at, spot=spot)
         dark = self.dark_pool_structure(ticker, cutoff_at, spot=spot, average_daily_dollar_volume=adv)
         earnings = self.earnings_priors(ticker, cutoff_at)

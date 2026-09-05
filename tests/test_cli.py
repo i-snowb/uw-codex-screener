@@ -63,7 +63,7 @@ class CliTest(unittest.TestCase):
         })
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            with self.assertRaisesRegex(ValueError, "between 0 and 20000"):
+        with self.assertRaisesRegex(ValueError, "between 0 and 39999"):
                 live_morning_run(
                     settings,
                     tickers=("QCOM",),
@@ -188,7 +188,7 @@ class CliTest(unittest.TestCase):
             "MORNING_EDGE_PROVIDER": "unusual_whales",
             "UNUSUAL_WHALES_API_KEY": "local-test-secret",
         })
-        with patch("morning_edge.cli.WeeklyRequestBudget") as budget_type:
+        with tempfile.TemporaryDirectory() as temporary, patch("morning_edge.cli.WeeklyRequestBudget") as budget_type:
             budget = budget_type.return_value.__enter__.return_value
             budget.usage.return_value.remaining_before_reserve = 5
             with self.assertRaisesRegex(ValueError, "maximum, 5 available"):
@@ -199,6 +199,7 @@ class CliTest(unittest.TestCase):
                     tickers=("QCOM",),
                     datasets=("ohlc",),
                     max_requests=2,
+                    database_path=Path(temporary) / "edge.sqlite",
                     live=True,
                     audit_accepted=True,
                 )
@@ -215,7 +216,7 @@ class CliTest(unittest.TestCase):
                 tickers=("QCOM",), datasets=("ohlc",), max_requests=1,
                 authorized_reserve_floor=5_000,
             )
-        with self.assertRaisesRegex(ValueError, "between 0 and 20000"):
+        with self.assertRaisesRegex(ValueError, "between 0 and 39999"):
             historical_backfill(
                 settings,
                 start_date="2026-08-21", end_date="2026-08-21",

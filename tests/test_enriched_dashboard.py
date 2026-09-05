@@ -1,4 +1,5 @@
 import importlib.util
+from datetime import date, timedelta
 from pathlib import Path
 import re
 import stat
@@ -38,6 +39,29 @@ def sample() -> dict:
 
 
 class EnrichedDashboardTests(unittest.TestCase):
+    def test_two_year_price_history_and_ohlcv_are_preserved(self) -> None:
+        start = date(2024, 1, 1)
+        bars = [
+            {
+                "date": (start + timedelta(days=index)).isoformat(),
+                "open": 100 + index,
+                "high": 102 + index,
+                "low": 99 + index,
+                "close": 101 + index,
+                "volume": 1_000_000 + index,
+                "ema20": 100.5 + index,
+                "ema50": 99.5 + index,
+            }
+            for index in range(530)
+        ]
+        parsed = dashboard._bars(bars)
+        self.assertEqual(520, len(parsed))
+        self.assertEqual((start + timedelta(days=10)).isoformat(), parsed[0]["d"])
+        self.assertEqual(
+            {"d", "o", "h", "l", "c", "v", "e20", "e50"},
+            set(parsed[-1]),
+        )
+
     def test_fail_closed_action_and_option_candidate(self) -> None:
         entry = dashboard.normalize_run(sample())["entries"][0]
         self.assertEqual("NO_RECOMMENDATION", entry["action"])
@@ -78,6 +102,18 @@ class EnrichedDashboardTests(unittest.TestCase):
         self.assertIn("Added provider signals", script)
         self.assertIn("Stress-test", script)
         self.assertIn("V4 volatility fan", script)
+        self.assertIn("'1Y':252,'2Y':504,'ALL':null", script)
+        self.assertIn("drawHistoryChart", script)
+        self.assertIn('id="me-study"', fragment)
+        self.assertIn("chartStudy='NONE'", script)
+        self.assertIn("chartIndicators", script)
+        self.assertIn("Long trend", script)
+        self.assertIn("Volatility", script)
+        self.assertIn("me-sma200", fragment)
+        self.assertIn("me-bb-band", fragment)
+        self.assertIn("hasVolume?[['VOLUME','Volume']]:[]", script)
+        self.assertIn("me-close-area", fragment)
+        self.assertIn("Volume", script)
         self.assertIn("V3 baseline", script)
         self.assertIn("IV envelope", script)
         self.assertIn("V4 shadow forecast", script)
@@ -133,6 +169,12 @@ class EnrichedDashboardTests(unittest.TestCase):
         self.assertIn("Forecast unavailable", script)
         self.assertIn("T12:00:00Z", script)
         self.assertIn("Stress-test with Codex", fragment)
+        self.assertIn('id="me-codex-dialog"', fragment)
+        self.assertIn('id="me-codex-prompt"', fragment)
+        self.assertIn("requestCodexStressTest", script)
+        self.assertIn("copyCodexPrompt", script)
+        self.assertIn("Prompt copied. Paste it into the current Codex task.", script)
+        self.assertNotIn("if(window.openai?.sendFollowUpMessage)await window.openai.sendFollowUpMessage", script)
         self.assertIn("\\u003cscript", script)
         self.assertNotIn("fetch(", fragment)
         self.assertIn("Decision view", fragment)

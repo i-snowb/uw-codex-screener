@@ -18,7 +18,7 @@ import sqlite3
 from typing import Any, Protocol
 
 from .models import Dataset, SnapshotEnvelope, timestamp_text
-from .providers.base import ProviderError
+from .providers.base import CollectionCircuit, ProviderError
 from .providers.budget import WeeklyRequestBudget
 from .providers.unusual_whales import (
     EndpointResponse,
@@ -344,12 +344,20 @@ def collect_current(
         )
 
     results: list[CurrentCaptureItem] = []
+    circuit = CollectionCircuit()
     for ticker in clean_tickers:
         for dataset in clean_datasets:
             spec = SPECS[dataset]
             endpoint = spec.endpoint.format(ticker=ticker)
+            if circuit.reason:
+                results.append(CurrentCaptureItem(
+                    ticker, dataset, CurrentCaptureStatus.UNAVAILABLE, endpoint,
+                    None, None, None, circuit.reason,
+                ))
+                continue
             try:
                 response = spec.collect(client, ticker)
+                circuit.success()
                 status, reason = _item_status(dataset, response)
                 raw = response.response.raw
                 as_of = _provider_gex_time(response) if dataset is CurrentDataset.DEALER_EXPOSURE else None
@@ -368,6 +376,7 @@ def collect_current(
                     row_count=len(_rows(response)), reason=reason,
                 ))
             except (ProviderError, ValueError, OSError) as error:
+                circuit.failure(error)
                 status = CurrentCaptureStatus.SCHEMA_MISMATCH if error.__class__.__name__ == "ProviderSchemaError" else CurrentCaptureStatus.UNAVAILABLE
                 results.append(CurrentCaptureItem(
                     ticker=ticker, dataset=dataset, status=status, endpoint=endpoint,

@@ -12,6 +12,17 @@ normalized run data and renderer.
 
 ## Credential boundary
 
+The local shell displays a wall-clock stale-data warning after six hours and
+shows refresh failures without discarding the last successful publication.
+This warning is a display rule, not an execution-freshness threshold.
+Polling reads the small `data/live-status.json` manifest first. It downloads
+`latest.json` only when the content hash changes and verifies that hash before
+applying the payload. Replay pauses polling until the user selects Live. An
+in-flight refresh cannot replace a newly selected replay.
+
+Base and enhanced captures must share a completed-capture cutoff. The renderer
+rejects an enhanced sidecar whose retrieval times exceed the run cutoff.
+
 The browser does not receive the Unusual Whales API key. Collection runs in
 Python. It reads the owner-private `.env` and stores licensed provider responses
 locally. The app reads only prepared JSON. Do not add credentials to HTML,

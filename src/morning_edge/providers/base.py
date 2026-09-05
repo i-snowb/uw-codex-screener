@@ -41,6 +41,31 @@ class ProviderResponseError(ProviderError):
     """A provider returned an unexpected HTTP response."""
 
 
+class ProviderNetworkError(ProviderResponseError):
+    """Transport failed before an HTTP response; no sensitive URL is retained."""
+
+
+class CollectionCircuit:
+    """Stop broad collections after shared transport, auth, or quota failure."""
+
+    def __init__(self) -> None:
+        self.network_failures = 0
+        self.reason: str | None = None
+
+    def success(self) -> None:
+        self.network_failures = 0
+
+    def failure(self, error: Exception) -> None:
+        if isinstance(error, (ProviderAuthenticationError, ProviderRateLimitError)):
+            self.reason = f"collection circuit open: {type(error).__name__}"
+        elif isinstance(error, (ProviderNetworkError, OSError)):
+            self.network_failures += 1
+            if self.network_failures >= 3:
+                self.reason = "collection circuit open: three consecutive transport failures"
+        else:
+            self.network_failures = 0
+
+
 class ProviderSchemaError(ProviderError):
     """A provider returned JSON that does not match the minimum contract."""
 
@@ -359,7 +384,7 @@ class SafeGetClient:
         except URLError:
             # Do not retain a lower-level exception as a cause: custom proxy
             # errors can include sensitive request material in their text.
-            raise ProviderResponseError("network error while requesting provider") from None
+            raise ProviderNetworkError("network error while requesting provider") from None
 
     def get_json(self, path: str, *, params: Mapping[str, Any] | None = None) -> JsonResponse:
         """Fetch JSON. Retries only idempotent GETs and never logs authorization."""
@@ -397,7 +422,7 @@ class SafeGetClient:
                 if attempt == self.max_attempts:
                     # An injected transport can accidentally include a token in
                     # its exception. Do not retain it as a chained cause.
-                    raise ProviderResponseError("provider GET failed after retry budget") from None
+                    raise ProviderNetworkError("provider GET failed after retry budget") from None
                 self._sleep(self._backoff(attempt, None))
                 continue
 

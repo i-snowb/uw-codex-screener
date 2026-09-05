@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,13 +25,12 @@ class PublicReleaseTests(unittest.TestCase):
         self.assertEqual(b"not-a-real-key", match.group(1))
 
     def test_public_tree_rejects_non_source_provider_capture(self) -> None:
-        candidate = ROOT / "tests" / "provider-capture.json"
-        candidate.write_text('{"provider":"unusual_whales"}\n', encoding="utf-8")
-        try:
-            paths = {path.relative_to(ROOT).as_posix() for path in release._source_files()}
+        with tempfile.TemporaryDirectory() as temporary, patch.object(release, "ROOT", Path(temporary)):
+            candidate = Path(temporary) / "tests" / "provider-capture.json"
+            candidate.parent.mkdir()
+            candidate.write_text('{"provider":"unusual_whales"}\n', encoding="utf-8")
+            paths = {path.relative_to(release.ROOT).as_posix() for path in release._source_files()}
             self.assertNotIn("tests/provider-capture.json", paths)
-        finally:
-            candidate.unlink(missing_ok=True)
 
     def test_sensitive_literal_pattern_covers_other_secret_names(self) -> None:
         payload = (

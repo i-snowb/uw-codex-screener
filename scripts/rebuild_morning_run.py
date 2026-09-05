@@ -8,6 +8,7 @@ implementation changes while the immutable source snapshots remain valid.
 from __future__ import annotations
 
 import argparse
+from datetime import UTC, datetime
 import json
 from pathlib import Path
 from typing import Any, Mapping
@@ -19,6 +20,7 @@ from morning_edge.current_collection import (
     CurrentDataset,
 )
 from morning_edge.daily import build_morning_run, write_morning_run
+from morning_edge.models import timestamp_from_text
 
 
 def _report(value: object) -> CurrentCaptureReport:
@@ -58,12 +60,25 @@ def main() -> None:
     parser.add_argument("--database", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
+    if args.input.resolve() == args.output.resolve() or args.output.exists():
+        raise SystemExit("reprocessed output must be a new path; original publications are immutable")
 
     source: Any = json.loads(args.input.read_text(encoding="utf-8"))
     if not isinstance(source, Mapping):
         raise SystemExit("input artifact must be an object")
     report = _report(source.get("capture_report"))
-    artifact = build_morning_run(database=args.database, capture_report=report)
+    if not report.preflight_passed or any(item.status not in {CurrentCaptureStatus.CAPTURED, CurrentCaptureStatus.EMPTY} for item in report.results):
+        raise SystemExit("cannot rebuild an incomplete capture as a successful research run")
+    artifact = build_morning_run(database=args.database, capture_report=report,
+        cutoff_at=timestamp_from_text(str(source["cutoff_at"])))
+    artifact["run_id"] += "-reprocessed-" + artifact["edge_feature_version"]
+    artifact["mode"] = "RETROSPECTIVE_REPROCESSING"
+    artifact["reprocessing"] = {
+        "source_run_id": source.get("run_id"),
+        "reprocessed_at": datetime.now(UTC).isoformat(),
+        "prospective_eligible": False,
+        "boundary": "Recomputed from stored cutoff-safe evidence; not a new prospective prediction or live capture.",
+    }
     destination = write_morning_run(args.output, artifact)
     print(json.dumps({
         "output": str(destination),

@@ -20,6 +20,32 @@ SPEC.loader.exec_module(MODULE)
 
 
 class DashboardBundleTests(unittest.TestCase):
+    def test_local_only_cli_updates_shell_and_latest_without_portable_export(self) -> None:
+        run = {
+            "run_id": "2026-08-31T06:45:00-04:00",
+            "cutoff_at": "2026-08-31T06:45:00-04:00",
+            "generated_at": "2026-08-31T06:46:00-04:00",
+            "mode": "SHADOW",
+            "watchlist": [],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "run.json"
+            source.write_text(json.dumps(run), encoding="utf-8")
+            self.assertEqual(
+                0,
+                MODULE.main([
+                    "--input", str(source),
+                    "--app-root", str(root / "app"),
+                    "--local-only",
+                ]),
+            )
+            self.assertTrue((root / "app" / "index.html").is_file())
+            self.assertTrue((root / "app" / "assets" / "app.js").is_file())
+            latest = json.loads((root / "app" / "data" / "latest.json").read_text())
+            self.assertEqual(run["run_id"], latest["dataVersion"])
+            self.assertFalse((root / "portable.html").exists())
+
     def test_bundle_separates_data_and_keeps_portable_export(self) -> None:
         run = {
             "run_id": "2026-08-28T06:45:00-04:00",

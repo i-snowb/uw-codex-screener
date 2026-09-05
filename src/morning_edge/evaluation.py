@@ -17,6 +17,8 @@ from pathlib import Path
 import statistics
 from typing import Any, Iterable, Mapping, Sequence
 
+from .clock import next_nyse_session
+from .edge import FORECAST_MODEL_VERSION
 from .ledger import ForecastLedger, ForecastRecord, OutcomeRecord
 from .models import timestamp_from_text, timestamp_text
 
@@ -330,6 +332,8 @@ def register_run(
     registration_mode = registration_mode.strip().upper()
     if registration_mode not in {"PROSPECTIVE", "RETROSPECTIVE_ARTIFACT_SEED"}:
         raise ValueError("registration_mode must be PROSPECTIVE or RETROSPECTIVE_ARTIFACT_SEED")
+    if registration_mode == "PROSPECTIVE" and (run.get("reprocessing") or run.get("mode") == "RETROSPECTIVE_REPROCESSING"):
+        raise ValueError("reprocessed research cannot be registered as prospective")
     cutoff_at = timestamp_from_text(_text(run.get("cutoff_at")))
     generated_at = timestamp_from_text(_text(run.get("generated_at", run.get("cutoff_at"))))
     run_id = _text(run.get("run_id"))
@@ -419,6 +423,12 @@ def register_run(
                     },
                 }
                 for horizon, target in sorted(targets.items()):
+                    center_return = _number(target.get("center_return"))
+                    horizon_direction = (
+                        "BULLISH" if center_return is not None and center_return > 0
+                        else "BEARISH" if center_return is not None and center_return < 0
+                        else "NEUTRAL" if center_return is not None else model_direction
+                    )
                     existing = ledger.connection.execute(
                         """
                         SELECT id FROM forecasts
@@ -454,7 +464,7 @@ def register_run(
                         source_snapshot_ids=source_ids,
                         trigger=_text(thesis.get("trigger_reference"), "No trigger supplied"),
                         invalidation=_text(thesis.get("invalidation_reference"), "No invalidation supplied"),
-                        feature_payload=feature_payload,
+                        feature_payload={**feature_payload, "direction": horizon_direction},
                         option_metadata=model_option,
                         friction_metadata={
                             "entry_mark": "stored_ask",
@@ -470,7 +480,9 @@ def register_run(
                             "run_id": run_id,
                             "origin_session": origin_session,
                             "origin_close": origin_close,
-                            "direction_label": model_direction,
+                            "direction_label": horizon_direction,
+                            "direction_semantics": "horizon-center-sign-v1" if center_return is not None else "published-thesis-fallback-v1",
+                            "terminal_direction_label": model_direction,
                             "target_center_return": _number(target.get("center_return")),
                             "target_low_return": _number(target.get("low_return")),
                             "target_high_return": _number(target.get("high_return")),
@@ -595,17 +607,24 @@ def evaluate_registered(database: str | Path, runs: Sequence[Mapping[str, Any]])
             origin_session = _text(metadata.get("origin_session"))[:10]
             origin_close = _number(metadata.get("origin_close"))
             ticker_observations = observations.get(forecast.record.ticker, {})
-            future_sessions = sorted(session for session in ticker_observations if session > origin_session)
             horizon = forecast.record.horizon_sessions
-            if origin_close is None or len(future_sessions) < horizon:
+            expected_sessions = []
+            session = date.fromisoformat(origin_session)
+            for _ in range(horizon):
+                session = next_nyse_session(session, include_current=False)
+                expected_sessions.append(session.isoformat())
+            target_session = expected_sessions[-1]
+            published_target = _text(metadata.get("published_target_date"))[:10]
+            # Missing sessions never slide a forecast onto a later observation.
+            if (origin_close is None or any(day not in ticker_observations for day in expected_sessions)
+                    or (published_target and published_target != target_session)):
                 pending += 1
                 continue
-            target_session = future_sessions[horizon - 1]
             observation = ticker_observations[target_session]
             if observation.known_at <= forecast.record.generated_at:
                 pending += 1
                 continue
-            path_sessions = future_sessions[:horizon]
+            path_sessions = expected_sessions
             closes = [origin_close] + [ticker_observations[session].close for session in path_sessions]
             actual_return = observation.close / origin_close - 1.0
             path_returns = [close / origin_close - 1.0 for close in closes[1:]]
@@ -627,6 +646,7 @@ def evaluate_registered(database: str | Path, runs: Sequence[Mapping[str, Any]])
                 realized_volatility=_realized_volatility(closes),
                 metadata={
                     "evaluation_version": EVALUATION_VERSION,
+                    "target_resolution_version": "exact-nyse-session-v1",
                     "target_session": target_session,
                     "origin_session": origin_session,
                     "observed_run_id": observation.run_id,
@@ -673,6 +693,7 @@ def build_report(database: str | Path) -> dict[str, Any]:
                 "origin_session": metadata.get("origin_session"),
                 "horizon_sessions": stored.record.horizon_sessions,
                 "direction": metadata.get("direction_label"),
+                "direction_semantics": metadata.get("direction_semantics", "legacy-terminal-direction"),
                 "model_version": stored.record.model_version,
                 "model_role": metadata.get("model_role", "ACTIVE_THESIS_V3"),
                 "conviction_score": stored.record.setup_score,
@@ -737,6 +758,10 @@ def build_report(database: str | Path) -> dict[str, Any]:
     # Keep platform and thesis metrics on the active model. All shadow models
     # appear only in model comparison until a promotion gate passes.
     rows = [row for row in model_rows if row["model_role"] == "ACTIVE_THESIS_V3"]
+    active_model = FORECAST_MODEL_VERSION if any(row["model_version"] == FORECAST_MODEL_VERSION for row in rows) else (
+        max(rows, key=lambda row: str(row["published_at"]))["model_version"] if rows else None
+    )
+    rows = [row for row in rows if row["model_version"] == active_model]
 
     horizons: dict[str, Any] = {}
     for horizon in HORIZONS:
@@ -865,6 +890,11 @@ def build_report(database: str | Path) -> dict[str, Any]:
     )
     return {
         "evaluation_version": EVALUATION_VERSION,
+        "active_model_version": active_model,
+        "direction_contract_breakdown": {
+            contract: _performance_slice([row for row in rows if row["direction_semantics"] == contract])
+            for contract in sorted({row["direction_semantics"] for row in rows})
+        },
         "generated_at": timestamp_text(datetime.now().astimezone()),
         "status": "INSUFFICIENT_OUT_OF_SAMPLE_HISTORY",
         "calibrated": False,

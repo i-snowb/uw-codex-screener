@@ -4,6 +4,13 @@ This runbook defines the 06:45 America/New_York Codex Screener workflow. It is a
 research pipeline. It does not authorize order entry, brokerage access, or a
 trade recommendation.
 
+Collection is fail-closed: `collection_failed` and `budget_blocked` return exit
+status 2. Inspect the separate `*-failed.json` diagnostic. Do not enrich,
+evaluate, or publish that attempt. Existing successful outputs remain intact.
+Three consecutive transport failures open the collection circuit; authentication
+and quota errors open it immediately. Base failure skips enhanced collection.
+Successful base and enhanced captures use one shared end-of-capture cutoff.
+
 ## Preconditions
 
 - Work only in this Codex Screener project.
@@ -119,8 +126,11 @@ PYTHONPATH=src python3 scripts/build_dashboard_bundle.py \
   --evaluation-input outputs/model-evaluation-summary.json \
   --previous-input outputs/runs/PREVIOUS-SESSION/morning-run-enriched.json \
   --app-root dashboard-app \
-  --portable-output artifacts/portable/codex-screener-YYYY-MM-DD.html
+  --local-only
 ```
+
+The scheduled workflow publishes to the local browser app only. Build a
+portable single-file archive separately, and only when a user requests one.
 
 Use the most recent earlier regular-session artifact for `--previous-input`.
 Omit the argument only when no prepared prior run exists. The dashboard then

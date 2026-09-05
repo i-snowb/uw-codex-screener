@@ -14,6 +14,14 @@ This layer makes model research reproducible. It does not enable recommendations
 
 The feature mart rejects a record when `available_at` is after its decision cutoff. Reusing the same record is idempotent. Reusing an identity with different content is an error.
 
+The builder includes derived-history source IDs, checks that every referenced
+snapshot exists, and verifies both observation and retrieval times against the
+cutoff. Availability is the latest actual source retrieval time. Missing values
+receive explicit reasons. `SOURCE_IDS_CUTOFF_VERIFIED` verifies the source set;
+it does not prove that each cited source supports every individual claim.
+Analyst accountability measures validated `agent_enrichment` when present, not
+the older deterministic fallback object.
+
 ## Model evaluation
 
 The evaluation ledger tracks the published V3 thesis, V4 shadow forecast, and independent challenger models. Active-thesis reporting requires at least 60 resolved rows and 60 distinct origin sessions per horizon. It reports:
@@ -29,6 +37,17 @@ The evaluation ledger tracks the published V3 thesis, V4 shadow forecast, and in
 - paper option outcomes only when a later stored bid exists.
 
 Analog frequency is not a probability. Probability scoring remains blocked until a calibrated probability forecast exists.
+
+New numeric forecasts use the sign of each horizon's own center return for
+direction scoring. The legacy terminal direction remains frozen in old records.
+Reports expose a direction-contract breakdown and restrict headline statistics
+to the active model version. No historical forecast or outcome is rewritten.
+
+Outcomes require the exact NYSE target session and all intervening session
+closes. Missing bars or a conflicting published target date remain pending;
+the evaluator never substitutes a later available close. Reprocessed research
+cannot be registered as prospective. Full session-path requirements also keep
+excursion and realized-volatility measurements comparable.
 
 ## Shadow models
 

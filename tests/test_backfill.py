@@ -218,6 +218,40 @@ class BackfillTests(unittest.TestCase):
         self.assertEqual("verified_not_required", stored.envelope.metadata["pagination_status"])
         self.assertEqual("verified_option_chain_date_scope", stored.envelope.metadata["historical_scope_status"])
 
+    def test_reuses_terminal_evidence_across_overlapping_plans(self) -> None:
+        first = make_plan(
+            provider="unusual_whales",
+            start_date=date(2026, 8, 21),
+            end_date=date(2026, 8, 21),
+            tickers=("QCOM",),
+            datasets=("option_chain",),
+        )
+        collect(
+            client=FakeHistoricalClient(), snapshots=self.store, plan=first,
+            max_requests=1, audit_accepted=True,
+        )
+
+        second = make_plan(
+            provider="unusual_whales",
+            start_date=date(2026, 8, 20),
+            end_date=date(2026, 8, 21),
+            tickers=("QCOM",),
+            datasets=("option_chain",),
+        )
+        client = FakeHistoricalClient()
+        result = collect(
+            client=client, snapshots=self.store, plan=second,
+            max_requests=2, audit_accepted=True,
+        )
+
+        self.assertEqual([("option_chain", "2026-08-20")], client.calls)
+        self.assertEqual(1, result["attempted_logical_items"])
+        self.assertEqual(2, result["state_counts"][CoverageState.COLLECTED.value])
+        events = BackfillStore(self.store).events(
+            next(item for item in second.items() if item.requested_date == date(2026, 8, 21))
+        )
+        self.assertEqual("reused_terminal_evidence_from_another_plan", events[-1][2]["reason"])
+
     def test_flow_alert_history_is_bounded_to_new_york_session(self) -> None:
         plan = make_plan(
             provider="unusual_whales", start_date=date(2026, 8, 21), end_date=date(2026, 8, 21),

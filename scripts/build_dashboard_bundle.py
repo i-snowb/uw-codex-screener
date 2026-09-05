@@ -74,17 +74,45 @@ def _externalize_data(script: str) -> str:
     replacement = """const response=await fetch('./data/latest.json',{cache:'no-store'});
 if(!response.ok)throw new Error(`Dashboard data request failed (${response.status})`);
 let DATA=await response.json();
+let replayActive=false,replaySelection='',navigationEpoch=0,appliedDigest=null;
+let refreshFailures=0,refreshInFlight=false;
 try{
   const catalogResponse=await fetch('./data/publications.json',{cache:'no-store'});
   if(catalogResponse.ok)DATA.publications=await catalogResponse.json();
 }catch{}
-document.getElementById('app-status')?.remove()"""
+document.getElementById('app-status').hidden=true"""
     external = script[:start] + replacement + script[value_end + 1:]
     external = external.replace(
         "let publicationLoader=null;",
         "const publicationLoader=async url=>{const response=await fetch(url,{cache:'no-store'});if(!response.ok)throw new Error(`Replay load failed (${response.status})`);return response.json()};",
         1,
     )
+    external = re.sub(r"function renderReplay\(\)\{[^\n]*", """function renderReplay(){
+  const select=byId('me-replay'),entries=DATA.publications?.entries||[];
+  if(!publicationLoader)return;
+  select.hidden=false;
+  select.innerHTML=`<option value="">Live · latest stored publication</option>${entries.map(row=>`<option value="${esc(row.url)}">${esc(row.date)} · ${esc(row.kind?.replaceAll('_',' '))}</option>`).join('')}`;
+  select.value=replaySelection;
+  select.onchange=async()=>{
+    const url=select.value,epoch=++navigationEpoch,previousReplay=replayActive;
+    replayActive=Boolean(url);
+    try{
+      const next=await publicationLoader(url||'./data/latest.json');
+      if(epoch!==navigationEpoch)return;
+      if(!next||!Array.isArray(next.entries))throw new Error('Invalid publication');
+      applyPublication(next);
+      replaySelection=url;
+      appliedDigest=null;
+      refreshFailures=0;
+      renderAvailability();
+    }catch(error){
+      if(epoch!==navigationEpoch)return;
+      replayActive=previousReplay;
+      select.value=replaySelection;
+      showRefreshError(error);
+    }
+  };
+}""", external, count=1)
     if not external.startswith("(()=>{"):
         raise ValueError("dashboard script must use the expected IIFE wrapper")
     external = "(async()=>{" + external[len("(()=>{"):]
@@ -93,23 +121,51 @@ document.getElementById('app-status')?.remove()"""
     if end < 0:
         raise ValueError("dashboard script closing wrapper was not found")
     live_refresh = """
-let refreshFailures=0;
-async function refreshLatest(){
-  if(document.hidden)return;
-  const nextResponse=await fetch(`./data/latest.json?v=${Date.now()}`,{cache:'no-store'});
-  if(!nextResponse.ok)throw new Error(`Dashboard refresh failed (${nextResponse.status})`);
-  const nextData=await nextResponse.json();
-  if(!nextData||!Array.isArray(nextData.entries))throw new Error('Dashboard refresh payload is invalid');
-  if(nextData.dataVersion===DATA.dataVersion)return;
-  const selectedTicker=DATA.entries[selected]?.ticker;
+function renderAvailability(){
+  const status=byId('app-status'),cutoff=Date.parse(DATA.asOf),age=(Date.now()-cutoff)/3600000;
+  status.hidden=false;
+  if(replayActive){status.textContent=`REPLAY — frozen publication as of ${DATA.asOf}. Automatic refresh is paused until you select Live.`;return}
+  if(refreshFailures){status.textContent=`REFRESH FAILED (${refreshFailures}) — showing the last stored publication as of ${DATA.asOf}. No new data is confirmed.`;return}
+  if(!Number.isFinite(age)||age>6){status.textContent=`${DATA.mode==='RETROSPECTIVE_REPROCESSING'?'RETROSPECTIVE RECALCULATION · ':''}STALE STORED DATA — as of ${DATA.asOf||'unknown'}${Number.isFinite(age)?` (${age.toFixed(1)} hours old)`:''}. This is not a live market quote.`;return}
+  status.textContent=`Latest stored publication as of ${DATA.asOf}. Research only; not a live market quote.`;
+}
+function showRefreshError(error){refreshFailures+=1;renderAvailability();console.error(error)}
+function applyPublication(nextData){
+  const selectedTicker=DATA.entries[selected]?.ticker,publications=DATA.publications;
   DATA=nextData;
+  DATA.publications=publications;
   selected=Math.max(0,DATA.entries.findIndex(item=>item.ticker===selectedTicker));
   setRunHeader();renderConsensusPulse();renderSystemStatus();renderMacro();renderRanking();renderWatchAlerts();renderWatchControls();renderControls();renderEvaluation();renderPlatformTracking();renderPlatformDetails();renderSelected();
+}
+async function refreshLatest(){
+  if(document.hidden||replayActive||refreshInFlight)return;
+  refreshInFlight=true;
+  const epoch=navigationEpoch;
+  try{
+  const manifestResponse=await fetch('./data/live-status.json',{cache:'no-store'});
+  if(!manifestResponse.ok)throw new Error(`Publication status failed (${manifestResponse.status})`);
+  const manifest=await manifestResponse.json();
+  if(!/^[a-f0-9]{64}$/.test(manifest.sha256||''))throw new Error('Invalid publication status');
+  if(epoch!==navigationEpoch||replayActive)return;
+  if(manifest.sha256===appliedDigest){refreshFailures=0;renderAvailability();return}
+  const nextResponse=await fetch('./data/latest.json',{cache:'no-store'});
+  if(!nextResponse.ok)throw new Error(`Dashboard refresh failed (${nextResponse.status})`);
+  const body=await nextResponse.text();
+  const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(body))),value=>value.toString(16).padStart(2,'0')).join('');
+  if(hash!==manifest.sha256)throw new Error('Publication changed during refresh; waiting for a coherent version');
+  const nextData=JSON.parse(body);
+  if(!nextData||!Array.isArray(nextData.entries))throw new Error('Dashboard refresh payload is invalid');
+  if(epoch!==navigationEpoch||replayActive)return;
+  applyPublication(nextData);
+  appliedDigest=hash;
   refreshFailures=0;
+  renderAvailability();
+  }finally{refreshInFlight=false}
 }
 const pollSeconds=Math.max(15,Math.min(120,Number(DATA.refresh?.pollSeconds)||30));
-setInterval(()=>refreshLatest().catch(error=>{refreshFailures+=1;if(refreshFailures===3)console.error(error)}),pollSeconds*1000);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshLatest().catch(()=>{})});
+setInterval(()=>refreshLatest().catch(showRefreshError),pollSeconds*1000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshLatest().catch(showRefreshError)});
+renderAvailability();
 """
     external = external[:end] + live_refresh + external[end:]
     end = external.rfind(ending)
@@ -259,6 +315,7 @@ def build_bundle(
     manifest_path = daily_directory / "manifest.json"
     _write_immutable(manifest_path, manifest_content)
     _update_publication_catalog(app_root)
+    publish_latest_data(run=run, app_root=app_root)
     manifest["manifest_path"] = str(manifest_path)
     return manifest
 
@@ -303,7 +360,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--portable-output", type=Path)
     parser.add_argument("--archive-reference", type=Path)
     parser.add_argument("--shell-only", action="store_true")
+    parser.add_argument(
+        "--local-only",
+        action="store_true",
+        help="Rebuild the local app shell and latest data without a portable export",
+    )
     args = parser.parse_args(argv)
+
+    if args.shell_only and args.local_only:
+        raise SystemExit("--shell-only and --local-only are mutually exclusive")
 
     run = _read_object(args.input, "input")
     for argument, key, label in (
@@ -315,9 +380,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             run[key] = _read_object(argument, label)
     if args.shell_only:
         manifest = {"shell_only": True, "files": build_shell(run=run, app_root=args.app_root)}
+    elif args.local_only:
+        manifest = {
+            "local_only": True,
+            "files": build_shell(run=run, app_root=args.app_root),
+            "latest": publish_latest_data(run=run, app_root=args.app_root),
+        }
     else:
         if args.portable_output is None:
-            raise SystemExit("--portable-output is required unless --shell-only is used")
+            raise SystemExit("--portable-output is required unless --shell-only or --local-only is used")
         manifest = build_bundle(
             run=run,
             app_root=args.app_root,

@@ -7,6 +7,7 @@ import argparse
 from datetime import date
 import json
 from pathlib import Path
+import sqlite3
 import sys
 from typing import Any, Mapping, Sequence
 
@@ -81,27 +82,65 @@ def _feature_values(entry: Mapping[str, Any]) -> dict[str, Any]:
         "thesis.direction": thesis.get("direction"),
         "thesis.evidence_score": _number(thesis.get("conviction_score")),
     }
-    return {key: value for key, value in values.items() if value is not None}
+    return values
+
+
+def _source_ids(value: Any) -> set[int]:
+    result: set[int] = set()
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if key in {"source_snapshot_ids", "snapshot_ids"} and isinstance(item, (list, tuple)):
+                result.update(x for x in item if isinstance(x, int) and not isinstance(x, bool) and x > 0)
+            elif key in {"snapshot_id", "source_snapshot_id"} and isinstance(item, int) and not isinstance(item, bool) and item > 0:
+                result.add(item)
+            else:
+                result.update(_source_ids(item))
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            result.update(_source_ids(item))
+    return result
+
+
+def _source_availability(database: Path, sources: Sequence[int], cutoff: Any) -> Any:
+    connection = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)
+    rows = []
+    try:
+        for start in range(0, len(sources), 500):
+            chunk = sources[start:start + 500]
+            rows.extend(connection.execute(
+                f"SELECT id, as_of, retrieved_at FROM snapshots WHERE id IN ({','.join('?' for _ in chunk)})",
+                chunk,
+            ).fetchall())
+    finally:
+        connection.close()
+    if {row[0] for row in rows} != set(sources):
+        raise ValueError("feature record references missing source snapshots")
+    timestamps = [(timestamp_from_text(row[1]), timestamp_from_text(row[2])) for row in rows]
+    if any(as_of > cutoff or retrieved > cutoff for as_of, retrieved in timestamps):
+        raise ValueError("feature source was not available at the declared cutoff")
+    return max(retrieved for _, retrieved in timestamps)
 
 
 def _agent_accountability(run: Mapping[str, Any]) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     for raw in run.get("watchlist", ()):
         entry = _mapping(raw)
-        analysis = _mapping(entry.get("agent_analysis"))
-        claims = [row for row in analysis.get("claims", ()) if isinstance(row, Mapping)]
-        referenced = sum(bool(_mapping(row).get("source_refs")) for row in claims)
-        summary = str(analysis.get("evidence_summary") or "").strip()
+        enriched = entry.get("agent_enrichment_validated") is True
+        analysis = _mapping(entry.get("agent_enrichment" if enriched else "agent_analysis"))
+        claims = [row for row in analysis.get("evidence_points" if enriched else "claims", ()) if isinstance(row, Mapping)]
+        referenced = sum(bool(row.get("field_refs") and row.get("source_snapshot_ids")) if enriched else bool(row.get("source_refs")) for row in claims)
+        summary = str(analysis.get("summary" if enriched else "evidence_summary") or "").strip()
         ticker = str(entry.get("ticker") or "").strip().upper()
         if ticker:
             rows.append({
                 "ticker": ticker,
-                "status": str(analysis.get("status") or "UNAVAILABLE"),
+                "status": "VALIDATED_ENRICHMENT_CONTRACT" if enriched else str(analysis.get("status") or "UNAVAILABLE"),
+                "measured_object": "agent_enrichment" if enriched else "agent_analysis",
                 "claim_count": len(claims),
                 "claims_with_source_refs": referenced,
                 "claim_reference_coverage": referenced / len(claims) if claims else None,
                 "summary_word_count": len(summary.split()),
-                "suggested_action": str(analysis.get("suggested_action") or "NO_RECOMMENDATION"),
+                "suggested_action": str(analysis.get("action" if enriched else "suggested_action") or "NO_RECOMMENDATION"),
             })
     return {
         "status": "MEASURED_OUTPUT_CONTRACT",
@@ -124,8 +163,7 @@ def build(run: Mapping[str, Any], *, feature_database: Path, evaluation_database
             entry = _mapping(raw)
             ticker = str(entry.get("ticker") or "").strip().upper()
             price = _mapping(entry.get("price"))
-            provenance = _mapping(entry.get("provenance"))
-            sources = [value for value in provenance.get("snapshot_ids", ()) if isinstance(value, int)]
+            sources = sorted(_source_ids(entry))
             if not ticker or not sources:
                 continue
             session = date.fromisoformat(str(price.get("as_of"))[:10])
@@ -135,11 +173,13 @@ def build(run: Mapping[str, Any], *, feature_database: Path, evaluation_database
                 model = _mapping(edge.get(key))
                 if model.get("model_version"):
                     model_versions.add(str(model["model_version"]))
+            values = _feature_values(entry)
             record = FeatureRecord(
                 ticker=ticker, effective_session=session, cutoff_at=cutoff,
-                available_at=cutoff, feature_version=version,
-                values=_feature_values(entry), source_snapshot_ids=sources,
-                quality_status="VALIDATED_SOURCE_LINKS" if _mapping(entry.get("agent_analysis")).get("validated") else "SOURCE_LINKED",
+                available_at=_source_availability(evaluation_database, sources, cutoff), feature_version=version,
+                values={key: value for key, value in values.items() if value is not None}, source_snapshot_ids=sources,
+                missing_reasons={key: "not_available_in_source_artifact" for key, value in values.items() if value is None},
+                quality_status="SOURCE_IDS_CUTOFF_VERIFIED",
             )
             records.append(mart.insert(record))
         replay_id = mart.register_replay(

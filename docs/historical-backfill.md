@@ -77,6 +77,11 @@ probes confirmed its requested scope at the current date and 30, 60, and 90
 days earlier. Accordingly, after adapter date validation, a non-empty
 option-chain response is `collected`.
 
+The OHLC backfill requests a `2Y` window with the provider's 2,500-row limit.
+This matches the API Basic historical entitlement and yields about 500 regular
+daily sessions for established symbols. Newly listed symbols naturally have
+shorter histories.
+
 `dark_pool` uses the provider's `older_than` cursor, persists every raw page,
 overlaps boundary timestamps, and de-duplicates by `tracking_id`. A short or
 empty terminal page is required before a date is complete. `open_interest`

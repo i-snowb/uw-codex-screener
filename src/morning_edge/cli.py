@@ -30,8 +30,9 @@ from .enhanced_features import build_enhanced_summary
 from .models import SnapshotEnvelope
 from .providers.base import JsonlRawResponseCapture
 from .providers.budget import (
-    DEFAULT_WEEKLY_CAP,
-    DEFAULT_WEEKLY_RESERVE,
+    API_BASIC_DAILY_CAP,
+    API_BASIC_DAILY_RESERVE,
+    API_BASIC_ROLLING_WINDOW,
     WeeklyRequestBudget,
 )
 from .providers.unusual_whales import UnusualWhalesClient
@@ -39,6 +40,16 @@ from .store import SnapshotStore
 
 
 MAX_TRANSPORT_ATTEMPTS_PER_LOGICAL_ITEM = 3
+
+
+def _api_basic_budget(path: Path, **options: Any) -> WeeklyRequestBudget:
+    return WeeklyRequestBudget(
+        path,
+        weekly_cap=API_BASIC_DAILY_CAP,
+        protected_reserve=API_BASIC_DAILY_RESERVE,
+        rolling_window=API_BASIC_ROLLING_WINDOW,
+        **options,
+    )
 
 
 def _json(payload: dict[str, Any]) -> None:
@@ -54,7 +65,7 @@ def initialize_database(path: Path) -> dict[str, object]:
 
 def provider_usage(settings: Settings) -> dict[str, object]:
     """Read the local request counter without contacting a provider."""
-    with WeeklyRequestBudget(settings.provider_usage_path) as request_budget:
+    with _api_basic_budget(settings.provider_usage_path) as request_budget:
         return {
             "status": "local_usage",
             "network_called": False,
@@ -85,7 +96,7 @@ def add_provider_baseline_adjustment(
     """Add one immutable, evidence-labelled local accounting adjustment."""
     effective = _utc_timestamp(effective_at, option="--effective-at")
     budget_options = {} if clock is None else {"clock": clock}
-    with WeeklyRequestBudget(settings.provider_usage_path, **budget_options) as request_budget:
+    with _api_basic_budget(settings.provider_usage_path, **budget_options) as request_budget:
         usage = request_budget.add_baseline_adjustment(
             adjustment_id=adjustment_id,
             attempted_requests=attempted_requests,
@@ -231,7 +242,7 @@ def audit_provider(
 
     observed_date = _audit_date(as_of)
     hook = JsonlRawResponseCapture(raw_capture) if raw_capture is not None else None
-    with WeeklyRequestBudget(settings.provider_usage_path) as request_budget:
+    with _api_basic_budget(settings.provider_usage_path) as request_budget:
         available_attempts = request_budget.usage().remaining_before_reserve
         maximum_audit_attempts = len(symbols) * 9 * MAX_TRANSPORT_ATTEMPTS_PER_LOGICAL_ITEM
         if maximum_audit_attempts > available_attempts:
@@ -338,7 +349,7 @@ def current_capture(
         )
     with (
         SnapshotStore(database_path or settings.database_path) as store,
-        WeeklyRequestBudget(settings.provider_usage_path) as request_budget,
+        _api_basic_budget(settings.provider_usage_path) as request_budget,
     ):
         client = UnusualWhalesClient(settings.provider_api_key, request_budget=request_budget)
         report = collect_current(
@@ -402,7 +413,7 @@ def enhanced_capture(
         raise ValueError("live enhanced capture requires --audit-accepted after endpoint review")
     with (
         SnapshotStore(database_path or settings.database_path) as store,
-        WeeklyRequestBudget(settings.provider_usage_path) as request_budget,
+        _api_basic_budget(settings.provider_usage_path) as request_budget,
     ):
         client = UnusualWhalesClient(settings.provider_api_key, request_budget=request_budget)
         report = collect_enhanced(
@@ -499,10 +510,10 @@ def live_morning_run(
         raise ConfigError("live morning run requires UNUSUAL_WHALES_API_KEY or CODEX_SCREENER_PROVIDER_API_KEY")
     if not audit_accepted:
         raise ValueError("live morning run requires --audit-accepted after reviewing the endpoint audit")
-    reserve_floor = DEFAULT_WEEKLY_RESERVE if authorized_reserve_floor is None else authorized_reserve_floor
-    if not 0 <= reserve_floor <= DEFAULT_WEEKLY_RESERVE:
+    reserve_floor = API_BASIC_DAILY_RESERVE if authorized_reserve_floor is None else authorized_reserve_floor
+    if not 0 <= reserve_floor < API_BASIC_DAILY_CAP:
         raise ValueError(
-            f"--authorized-reserve-floor must be between 0 and {DEFAULT_WEEKLY_RESERVE}"
+            f"--authorized-reserve-floor must be between 0 and {API_BASIC_DAILY_CAP - 1}"
         )
     symbols = tuple(tickers) or settings.watchlist
     selected = tuple(CurrentDataset(item) for item in datasets) if datasets else tuple(CurrentDataset)
@@ -510,7 +521,9 @@ def live_morning_run(
         SnapshotStore(database_path) as store,
         WeeklyRequestBudget(
             settings.provider_usage_path,
+            weekly_cap=API_BASIC_DAILY_CAP,
             protected_reserve=reserve_floor,
+            rolling_window=API_BASIC_ROLLING_WINDOW,
         ) as request_budget,
     ):
         client = UnusualWhalesClient(settings.provider_api_key, request_budget=request_budget)
@@ -528,26 +541,54 @@ def live_morning_run(
             request_budget=request_budget,
             tickers=symbols,
             max_transport_attempts_per_item=MAX_TRANSPORT_ATTEMPTS_PER_LOGICAL_ITEM,
-        ) if report.preflight_passed else None
-    artifact = build_morning_run(database=database_path, capture_report=report)
+        ) if report.preflight_passed and all(
+            item.status.value in {"captured", "empty"} for item in report.results
+        ) else None
+    unavailable = sum(item.status.value not in {"captured", "empty"} for item in report.results)
+    enhanced_unavailable = (
+        sum(item.status.value not in {"captured", "empty"} for item in enhanced_report.results)
+        if enhanced_report is not None else 0
+    )
+    complete = (
+        report.preflight_passed and unavailable == 0 and enhanced_report is not None
+        and enhanced_report.preflight_passed and enhanced_unavailable == 0
+    )
+    if not complete:
+        failure = {
+            "status": "collection_failed" if report.preflight_passed else "budget_blocked",
+            "network_called": report.preflight_passed,
+            "recommendations_enabled": False,
+            "capture_report": report.to_dict(),
+            "enhanced_capture_report": enhanced_report.to_dict() if enhanced_report else None,
+            "unavailable_items": unavailable,
+            "enhanced_unavailable_items": enhanced_unavailable,
+            "analysis_started": False,
+            "artifact_path": None,
+            "dashboard_path": None,
+        }
+        diagnostic = output_path.with_name(f"{output_path.stem}-failed.json")
+        failure["diagnostic_path"] = str(diagnostic)
+        write_morning_run(diagnostic, failure)
+        return failure
+    # Freeze all base and enhanced evidence at the same completed-capture cutoff.
+    cutoff = max(datetime.fromisoformat(value.replace("Z", "+00:00")) for value in [
+        report.generated_at, enhanced_report.generated_at,
+        *(item.fetched_at for item in (*report.results, *enhanced_report.results) if item.fetched_at),
+    ])
+    artifact = build_morning_run(database=database_path, capture_report=report, cutoff_at=cutoff)
     destination = write_morning_run(output_path, artifact)
     enhanced_path = output_path.with_name(f"{output_path.stem}-enhanced.json")
     enhanced_ids = (
         [item.snapshot_id for item in enhanced_report.results if item.snapshot_id is not None]
         if enhanced_report is not None else []
     )
-    enhanced_artifact = build_enhanced_summary(database_path, snapshot_ids=enhanced_ids)
+    enhanced_artifact = build_enhanced_summary(database_path, snapshot_ids=enhanced_ids, cutoff_at=cutoff)
+    enhanced_artifact["cutoff_at"] = artifact["cutoff_at"]
     enhanced_artifact["capture_report"] = enhanced_report.to_dict() if enhanced_report is not None else None
     enhanced_destination = write_morning_run(enhanced_path, enhanced_artifact)
     rendered = _render_morning_dashboard(destination, dashboard_path) if dashboard_path else None
-    unavailable = sum(item.status.value not in {"captured", "empty"} for item in report.results)
-    enhanced_unavailable = (
-        sum(item.status.value not in {"captured", "empty"} for item in enhanced_report.results)
-        if enhanced_report is not None else 0
-    )
-    complete = report.preflight_passed and enhanced_report is not None and enhanced_report.preflight_passed
     return {
-        "status": "morning_run_complete" if complete else "budget_blocked",
+        "status": "morning_run_complete",
         "network_called": report.preflight_passed,
         "recommendations_enabled": False,
         "run_id": artifact["run_id"],
@@ -565,7 +606,9 @@ def live_morning_run(
         "dashboard_path": str(rendered) if rendered else None,
         "remaining_transport_attempt_capacity_before_run": report.remaining_transport_attempt_capacity_before_run,
         "authorized_reserve_floor": reserve_floor,
-        "reserve_override_applied": reserve_floor < DEFAULT_WEEKLY_RESERVE,
+        "reserve_override_applied": reserve_floor < API_BASIC_DAILY_RESERVE,
+        "request_window_hours": 24,
+        "request_window_cap": API_BASIC_DAILY_CAP,
     }
 
 
@@ -611,17 +654,18 @@ def historical_backfill(
         raise ConfigError("live backfill requires UNUSUAL_WHALES_API_KEY or CODEX_SCREENER_PROVIDER_API_KEY")
     if not audit_accepted:
         raise ValueError("live backfill requires --audit-accepted after reviewing the endpoint audit")
-    reserve_floor = DEFAULT_WEEKLY_RESERVE if authorized_reserve_floor is None else authorized_reserve_floor
-    if not 0 <= reserve_floor <= DEFAULT_WEEKLY_RESERVE:
+    reserve_floor = API_BASIC_DAILY_RESERVE if authorized_reserve_floor is None else authorized_reserve_floor
+    if not 0 <= reserve_floor < API_BASIC_DAILY_CAP:
         raise ValueError(
-            f"--authorized-reserve-floor must be between 0 and {DEFAULT_WEEKLY_RESERVE}"
+            f"--authorized-reserve-floor must be between 0 and {API_BASIC_DAILY_CAP - 1}"
         )
     with (
         SnapshotStore(database_path or settings.database_path) as store,
         WeeklyRequestBudget(
             settings.provider_usage_path,
-            weekly_cap=DEFAULT_WEEKLY_CAP,
+            weekly_cap=API_BASIC_DAILY_CAP,
             protected_reserve=reserve_floor,
+            rolling_window=API_BASIC_ROLLING_WINDOW,
         ) as request_budget,
     ):
         available_attempts = request_budget.usage().remaining_before_reserve
@@ -644,7 +688,9 @@ def historical_backfill(
             "maximum_transport_attempts": maximum_transport_attempts,
             "remaining_transport_attempt_capacity_before_run": available_attempts,
             "authorized_reserve_floor": reserve_floor,
-            "reserve_override_applied": reserve_floor < DEFAULT_WEEKLY_RESERVE,
+            "reserve_override_applied": reserve_floor < API_BASIC_DAILY_RESERVE,
+            "request_window_hours": 24,
+            "request_window_cap": API_BASIC_DAILY_CAP,
         })
         return result
 
@@ -789,8 +835,8 @@ def build_parser() -> argparse.ArgumentParser:
     backfill.add_argument(
         "--authorized-reserve-floor", type=int,
         help=(
-            "Explicit live-backfill-only reserve floor, 0 to 20000. "
-            "Omit to preserve the normal 20000-request reserve."
+            "Explicit live-backfill-only daily reserve floor, 0 to 39999. "
+            "Omit to preserve the API Basic 7000-request reserve."
         ),
     )
     return parser
@@ -901,7 +947,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _json({"status": "error", "error": str(exc)})
         return 2
     _json(result)
-    return 0
+    return 2 if result.get("status") in {"collection_failed", "budget_blocked"} else 0
 
 
 if __name__ == "__main__":
