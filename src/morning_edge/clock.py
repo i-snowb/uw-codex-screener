@@ -87,6 +87,8 @@ def nyse_holidays(year: int) -> frozenset[date]:
     }
     if year >= 2022:
         holidays.add(_observed(date(year, 6, 19)))
+    if year == 2025:
+        holidays.add(date(2025, 1, 9))  # NYSE national day of mourning.
     next_new_year = _observed(date(year + 1, 1, 1))
     if next_new_year.year == year:
         holidays.add(next_new_year)

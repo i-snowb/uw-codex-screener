@@ -566,11 +566,14 @@ def _option_outcome(
     expiry_text = _text(option.get("expiry"))[:10]
     if not contract or entry_ask is None or entry_ask <= 0:
         return None, {"available": False, "reason": "published contract or positive entry ask missing"}
-    if expiry_text and observation.session >= expiry_text and strike is not None:
+    if expiry_text and observation.session > expiry_text:
+        return None, {"available": False, "reason": "exact expiration-session close unavailable; later closes cannot value expiry"}
+    if expiry_text and observation.session == expiry_text and strike is not None:
         intrinsic = max(0.0, observation.close - strike) if option_type == "CALL" else max(0.0, strike - observation.close)
         return (intrinsic / entry_ask - 1.0) * 100.0, {
             "available": True, "entry": entry_ask, "exit": intrinsic,
             "entry_mark": "stored_ask", "exit_mark": "expiration_intrinsic",
+            "execution_validated": False, "costs_included": False,
         }
     later = _mapping(observation.options.get(contract))
     exit_bid = _number(later.get("bid"))
@@ -579,7 +582,7 @@ def _option_outcome(
     return (exit_bid / entry_ask - 1.0) * 100.0, {
         "available": True, "entry": entry_ask, "exit": exit_bid,
         "entry_mark": "stored_ask", "exit_mark": "later_stored_bid",
-        "contract": contract,
+        "contract": contract, "execution_validated": False, "costs_included": False,
     }
 
 
@@ -927,7 +930,8 @@ def build_report(database: str | Path) -> dict[str, Any]:
             "reason": "Observed analog frequencies are not calibrated probabilities; Brier and log scores are intentionally omitted.",
         },
         "dependence_note": "Ticker outcomes from one origin session share market conditions. Equal-weight origin metrics are the primary maturity read; row-weighted accuracy is diagnostic.",
-        "paper_option_method": "published stored ask to first eligible later stored bid; expiration uses intrinsic value; commissions and additional slippage excluded",
+        "paper_option_method": "published stored ask to first eligible later stored bid; new expiration marks require the exact expiry-session close; commissions and additional slippage excluded; legacy outcomes remain immutable",
+        "execution_validated_option_results": False,
         "limitations": [
             "Direction accuracy is compared with the realized majority-direction baseline.",
             "Retrospectively registered dated artifacts are shown as seed diagnostics and never count toward prospective calibration gates.",

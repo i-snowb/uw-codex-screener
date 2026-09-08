@@ -12,6 +12,7 @@ import re
 from typing import Any, Mapping, Sequence
 
 from private_artifacts import write_private_bytes
+from morning_edge.evidence_join import field_sources
 
 
 ENRICHMENT_SCHEMA = "codex_agent_enrichment/v1"
@@ -114,7 +115,7 @@ def _validate_record(candidate: Any, source: Mapping[str, Any]) -> dict[str, Any
         raise ValueError(f"{ticker}.option_context must explicitly say non-actionable or not actionable")
 
     allowed_ids = {
-        value for value in _object(source.get("provenance"), f"{ticker}.provenance").get("snapshot_ids", [])
+        value for value in _object(source.get("provenance"), f"{ticker}.provenance").get("analysis_snapshot_ids", source.get("provenance", {}).get("snapshot_ids", []))
         if isinstance(value, int) and not isinstance(value, bool)
     }
     evidence_points: list[dict[str, Any]] = []
@@ -131,6 +132,13 @@ def _validate_record(candidate: Any, source: Mapping[str, Any]) -> dict[str, Any
             raise ValueError(f"{ticker} evidence source IDs must be integers")
         if not set(ids).issubset(allowed_ids):
             raise ValueError(f"{ticker} evidence cites a snapshot outside the current capture")
+        for ref in refs:
+            expected = field_sources(source, ref)
+            if expected is not None and not expected.intersection(ids):
+                raise ValueError(f"{ticker} evidence cites no source for field {ref}")
+        mapped = [field_sources(source, ref) for ref in refs]
+        if all(value is not None for value in mapped) and not set(ids).issubset(set().union(*mapped)):
+            raise ValueError(f"{ticker} evidence cites an unrelated field source")
         point["field_refs"] = refs
         point["source_snapshot_ids"] = ids
         evidence_points.append(point)

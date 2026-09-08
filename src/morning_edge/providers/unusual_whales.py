@@ -235,6 +235,26 @@ class UnusualWhalesClient:
             raise ValueError(f"{API_KEY_ENVIRONMENT_VARIABLE} is not set")
         return cls(token, **kwargs)
 
+    def company_reference(self, ticker: str, *, kind: str) -> EndpointResponse:
+        """Capture documented corporate-action arrays without inferring adjustments."""
+        if kind not in {'splits', 'dividends'}:
+            raise ValueError('company reference kind must be splits or dividends')
+        symbol = _ticker(ticker)
+        endpoint = f'/api/companies/{symbol}/{kind}'
+        response = self._http.get_json(endpoint)
+        data = response.data
+        if not isinstance(data, Mapping) or data.get('ticker') != symbol or not isinstance(data.get(kind), list) or any(not isinstance(row, Mapping) for row in data[kind]):
+            raise ProviderSchemaError('company reference requires matching ticker and an object array')
+        return EndpointResponse(endpoint, response)
+
+    def security_listings(self) -> EndpointResponse:
+        endpoint = '/api/companies/listings'
+        response = self._http.get_json(endpoint, params={'status': 'active'})
+        data = response.data
+        if not isinstance(data, Mapping) or data.get('status') != 'active' or not isinstance(data.get('listings'), list) or any(not isinstance(row, Mapping) for row in data['listings']):
+            raise ProviderSchemaError('active listings requires a status and object array')
+        return EndpointResponse(endpoint, response)
+
     def option_chain(self, ticker: str, *, as_of: date | str | None = None, greeks: bool = True) -> EndpointResponse:
         """Get contract rows enriched with NBBO, IV, OI, volume, and Greeks.
 

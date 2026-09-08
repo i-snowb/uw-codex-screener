@@ -50,7 +50,7 @@ class IntradayPolicyTests(unittest.TestCase):
         }
         enhanced = {
             "stock_state": {"price": 102},
-            "greek_flow": {"directional_delta_flow": 25000, "delta_sign_persistence": 0.7},
+            "greek_flow": {"directional_delta_flow": 25000, "delta_sign_persistence": 0.7, "confirmation_eligible": True, "session_date": "2026-08-28"},
             "greek_exposure": {"near_spot_regime": "positive"},
         }
         result = intraday_condition(
@@ -88,7 +88,7 @@ class IntradayPolicyTests(unittest.TestCase):
         }
         enhanced = {"symbols": {"QCOM": {
             "stock_state": {"price": 97},
-            "greek_flow": {"directional_delta_flow": -100, "delta_sign_persistence": 0.8},
+            "greek_flow": {"directional_delta_flow": -100, "delta_sign_persistence": 0.8, "confirmation_eligible": True, "session_date": "2026-08-28"},
         }}}
         merge_frozen_daily_model(
             live,

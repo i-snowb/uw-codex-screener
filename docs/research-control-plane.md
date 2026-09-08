@@ -22,6 +22,34 @@ it does not prove that each cited source supports every individual claim.
 Analyst accountability measures validated `agent_enrichment` when present, not
 the older deterministic fallback object.
 
+`research-fields-v2` corrects the GEX flip-distance and long-volatility score
+paths, attaches enhanced Greek flow, and expresses all stock/benchmark return
+features as fractions. GEX flip distance remains percentage points. It stores
+nearest-expiry IV context, Greek coverage and exact-session relative returns.
+The version change prevents corrected values from silently changing old mart
+records. Daily outputs are compact reusable feature partitions; raw evidence
+remains immutable. Reader-local bar caching and SQL source-ID selection reduce
+repeated decoding. Capture phase timings are recorded by the daily gateway.
+
+Before adding these fields to a numeric forecast, preregister date-blocked
+walk-forward folds, a gap at least as long as the forecast horizon, fixed
+market/sector baselines, family ablations and explicit costs. Select features
+only on each training fold. Report held-out results by independent origin date,
+not correlated ticker rows. Insufficient history must abstain. Corporate-action
+adjustment and security-lineage reconciliation remain prerequisites for claims
+about large historical jumps; do not remove outliers or manufacture adjusted
+prices without source evidence.
+
+The optional `scripts/collect_reference_context.py` stages splits, dividends and
+active security listings from the documented Companies API. Its network-free
+default plan is 29 logical requests for 14 tickers (87 maximum attempts). Live
+capture needs `--live --audit-accepted`, a regular session and the protected
+reserve. It stops at the first failure. Do not make this unverified-entitlement
+extension a dependency of tomorrow's core capture. Capturing these arrays is
+not reconciliation: verify adjustment basis, event dates, prior symbols and
+option deliverables before changing price histories or model inputs. The first
+authorized capture and reconciliation remain separate acceptance steps.
+
 ## Model evaluation
 
 The evaluation ledger tracks the published V3 thesis, V4 shadow forecast, and independent challenger models. Active-thesis reporting requires at least 60 resolved rows and 60 distinct origin sessions per horizon. It reports:

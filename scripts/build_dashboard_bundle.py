@@ -9,6 +9,7 @@ Provider credentials are never read or written by this command.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, UTC
 import hashlib
 import json
 import re
@@ -71,17 +72,42 @@ def _externalize_data(script: str) -> str:
     value_end = value_start + consumed
     if script[value_end:value_end + 1] != ";":
         raise ValueError("inline dashboard data declaration is malformed")
-    replacement = """const response=await fetch('./data/latest.json',{cache:'no-store'});
+    replacement = r"""const response=await fetch('./data/latest.json',{cache:'no-store'});
 if(!response.ok)throw new Error(`Dashboard data request failed (${response.status})`);
-let DATA=await response.json();
-let replayActive=false,replaySelection='',navigationEpoch=0,appliedDigest=null;
+const initialBody=await response.text(),initialStatus=await fetch('./data/live-status.json',{cache:'no-store'});
+if(!initialStatus.ok)throw new Error('Publication manifest unavailable');
+const initialManifest=await initialStatus.json(),initialDigest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(initialBody))),b=>b.toString(16).padStart(2,'0')).join('');
+if(initialDigest!==initialManifest.sha256)throw new Error('Publication changed during initial load; reload to retry');
+let DATA=JSON.parse(initialBody);
+let replayActive=false,replaySelection='',navigationEpoch=0,appliedDigest=initialDigest;
 let refreshFailures=0,refreshInFlight=false;
+let pipelineStatus=null;
+const detailLoads=new Map();
+async function loadDetail(entry){
+  if(!entry?.detail||entry.detailLoaded)return;
+  const {url,sha256}=entry.detail;
+  if(!/^\.\/data\/details\/[a-f0-9]{64}\.json$/.test(url)||!/^([a-f0-9]{64})$/.test(sha256))throw new Error('Invalid detail reference');
+  if(!detailLoads.has(sha256))detailLoads.set(sha256,(async()=>{
+    const r=await fetch(url);if(!r.ok)throw new Error('Ticker detail unavailable');
+    const bytes=await r.arrayBuffer(),digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');
+    if(digest!==sha256)throw new Error('Ticker detail integrity check failed');
+    const detail=JSON.parse(new TextDecoder().decode(bytes));if(detail.ticker!==entry.ticker)throw new Error('Ticker detail mismatch');
+    return detail;
+  })().catch(error=>{detailLoads.delete(sha256);throw error}));
+  const detail=await detailLoads.get(sha256);entry.bars=detail.bars;entry.options=detail.options;entry.detailLoaded=true;
+}
+await loadDetail(DATA.entries?.[0]);
+try{
+  const r=await fetch('./data/pipeline-status.json',{cache:'no-store'});
+  if(r.ok)pipelineStatus=await r.json();
+}catch{}
 try{
   const catalogResponse=await fetch('./data/publications.json',{cache:'no-store'});
   if(catalogResponse.ok)DATA.publications=await catalogResponse.json();
 }catch{}
 document.getElementById('app-status').hidden=true"""
     external = script[:start] + replacement + script[value_end + 1:]
+    external = external.replace('function renderSelected(){', 'function renderSelectedCore(){', 1)
     external = external.replace(
         "let publicationLoader=null;",
         "const publicationLoader=async url=>{const response=await fetch(url,{cache:'no-store'});if(!response.ok)throw new Error(`Replay load failed (${response.status})`);return response.json()};",
@@ -121,11 +147,22 @@ document.getElementById('app-status').hidden=true"""
     if end < 0:
         raise ValueError("dashboard script closing wrapper was not found")
     live_refresh = """
+function renderSelected(){
+  const entry=DATA.entries[selected];
+  if(entry?.detail&&!entry.detailLoaded){
+    const epoch=navigationEpoch;
+    loadDetail(entry).then(()=>{if(epoch===navigationEpoch&&entry===DATA.entries[selected]){renderSelectedCore();renderAvailability()}}).catch(showRefreshError);
+    byId('app-status').hidden=false;byId('app-status').textContent=`Loading verified detail for ${entry.ticker}…`;
+    return;
+  }
+  renderSelectedCore();
+}
 function renderAvailability(){
   const status=byId('app-status'),cutoff=Date.parse(DATA.asOf),age=(Date.now()-cutoff)/3600000;
   status.hidden=false;
   if(replayActive){status.textContent=`REPLAY — frozen publication as of ${DATA.asOf}. Automatic refresh is paused until you select Live.`;return}
   if(refreshFailures){status.textContent=`REFRESH FAILED (${refreshFailures}) — showing the last stored publication as of ${DATA.asOf}. No new data is confirmed.`;return}
+  if(pipelineStatus&&pipelineStatus.status!=='PUBLISHED'){status.textContent=`PIPELINE ${pipelineStatus.status} · ${pipelineStatus.stage||'unknown stage'} · ${pipelineStatus.reason||''} · latest publication remains ${DATA.asOf}.`;return}
   if(!Number.isFinite(age)||age>6){status.textContent=`${DATA.mode==='RETROSPECTIVE_REPROCESSING'?'RETROSPECTIVE RECALCULATION · ':''}STALE STORED DATA — as of ${DATA.asOf||'unknown'}${Number.isFinite(age)?` (${age.toFixed(1)} hours old)`:''}. This is not a live market quote.`;return}
   status.textContent=`Latest stored publication as of ${DATA.asOf}. Research only; not a live market quote.`;
 }
@@ -142,6 +179,8 @@ async function refreshLatest(){
   refreshInFlight=true;
   const epoch=navigationEpoch;
   try{
+  const pipelineResponse=await fetch('./data/pipeline-status.json',{cache:'no-store'});
+  if(pipelineResponse.ok)pipelineStatus=await pipelineResponse.json();
   const manifestResponse=await fetch('./data/live-status.json',{cache:'no-store'});
   if(!manifestResponse.ok)throw new Error(`Publication status failed (${manifestResponse.status})`);
   const manifest=await manifestResponse.json();
@@ -156,7 +195,10 @@ async function refreshLatest(){
   const nextData=JSON.parse(body);
   if(!nextData||!Array.isArray(nextData.entries))throw new Error('Dashboard refresh payload is invalid');
   if(epoch!==navigationEpoch||replayActive)return;
+  try{const r=await fetch('./data/publications.json',{cache:'no-store'});if(r.ok)DATA.publications=await r.json()}catch{}
+  if(epoch!==navigationEpoch||replayActive)return;
   applyPublication(nextData);
+  renderReplay();
   appliedDigest=hash;
   refreshFailures=0;
   renderAvailability();
@@ -225,6 +267,15 @@ def publish_latest_data(*, run: Mapping[str, Any], app_root: Path) -> dict[str, 
     """Atomically publish one normalized intraday view without changing dated data."""
 
     normalized = dashboard.normalize_run(run)
+    for entry in normalized.get('entries', []):
+        detail = {key: entry.get(key) for key in ('ticker', 'bars', 'options')}
+        detail_content = (json.dumps(detail, ensure_ascii=False, separators=(',', ':'), sort_keys=True) + '\n').encode()
+        digest = _digest(detail_content)
+        detail_path = app_root / 'data' / 'details' / (digest + '.json')
+        _write_immutable(detail_path, detail_content)
+        entry['bars'] = (entry.get('bars') or [])[-2:]
+        entry['options'] = []
+        entry['detail'] = {'url': './data/details/' + digest + '.json', 'sha256': digest}
     content = (json.dumps(normalized, ensure_ascii=False, separators=(",", ":"), sort_keys=True) + "\n").encode("utf-8")
     latest = app_root / "data" / "latest.json"
     status = app_root / "data" / "live-status.json"
@@ -240,6 +291,25 @@ def publish_latest_data(*, run: Mapping[str, Any], app_root: Path) -> dict[str, 
     }
     _atomic_write(status, (json.dumps(status_payload, indent=2, sort_keys=True) + "\n").encode("utf-8"))
     return status_payload | {"path": str(latest), "bytes": len(content)}
+
+
+def archive_daily_data(*, run: Mapping[str, Any], app_root: Path) -> dict[str, Any]:
+    normalized = dashboard.normalize_run(run)
+    content = (json.dumps(normalized, ensure_ascii=False, separators=(',', ':'), sort_keys=True) + '\n').encode()
+    run_date = str(run.get('cutoff_at', normalized.get('asOf')))[:10]
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', run_date):
+        raise ValueError('archive requires an ISO date')
+    root = app_root / 'data' / run_date
+    if (root / 'run.json').exists() and (root / 'run.json').read_bytes() != content:
+        root = app_root / 'data' / 'publications' / run_date / _digest(content)[:16]
+    path = root / 'run.json'
+    _write_immutable(path, content)
+    manifest = {'schema_version': SCHEMA_VERSION, 'run_id': run.get('run_id'), 'run_date': run_date, 'generated_at': normalized.get('generatedAt'), 'publication_kind': 'CONTENT_ADDRESSED_REVISION' if 'publications' in root.parts else 'CANONICAL_DATE', 'files': {'daily_data': {'path': str(path.resolve()), 'sha256': _digest(content), 'bytes': len(content)}}, 'research_only': True, 'credentials_embedded': False}
+    manifest_path = root / 'manifest.json'
+    if not manifest_path.exists():
+        _write_immutable(manifest_path, (json.dumps(manifest, indent=2, sort_keys=True) + '\n').encode())
+    _update_publication_catalog(app_root)
+    return manifest
 
 
 def build_bundle(
@@ -360,6 +430,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--portable-output", type=Path)
     parser.add_argument("--archive-reference", type=Path)
     parser.add_argument("--shell-only", action="store_true")
+    parser.add_argument("--require-ready", action="store_true", help="Reject stale, unvalidated or retrospective daily publications")
     parser.add_argument(
         "--local-only",
         action="store_true",
@@ -371,6 +442,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit("--shell-only and --local-only are mutually exclusive")
 
     run = _read_object(args.input, "input")
+    if args.require_ready:
+        from morning_edge.data_health import assert_publishable
+        try:
+            run['data_health'] = assert_publishable(run, observed_at=datetime.now(UTC))
+        except (ValueError, KeyError, TypeError) as error:
+            payload = {'status': 'FAILED', 'stage': 'publication_validation', 'reason': 'Daily readiness validation failed; previous publication preserved.', 'error_class': type(error).__name__, 'updated_at': datetime.now(UTC).isoformat()}
+            _atomic_write(args.app_root / 'data' / 'pipeline-status.json', (json.dumps(payload, sort_keys=True) + '\n').encode())
+            raise SystemExit(2) from error
     for argument, key, label in (
         (args.enhanced_input, "enhanced_summary", "enhanced input"),
         (args.evaluation_input, "model_evaluation", "evaluation input"),
@@ -383,6 +462,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.local_only:
         manifest = {
             "local_only": True,
+            "archive": archive_daily_data(run=run, app_root=args.app_root),
             "files": build_shell(run=run, app_root=args.app_root),
             "latest": publish_latest_data(run=run, app_root=args.app_root),
         }
@@ -395,6 +475,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             portable_output=args.portable_output,
             archive_reference=args.archive_reference,
         )
+    if args.require_ready and not args.shell_only:
+        payload = {'status': 'PUBLISHED', 'stage': 'publication', 'reason': 'Session and enrichment gates passed; research only.', 'run_id': run.get('run_id'), 'cutoff_at': run.get('cutoff_at'), 'updated_at': datetime.now(UTC).isoformat(), 'health': run['data_health']}
+        _atomic_write(args.app_root / 'data' / 'pipeline-status.json', (json.dumps(payload, sort_keys=True) + '\n').encode())
     print(json.dumps(manifest, sort_keys=True))
     return 0
 

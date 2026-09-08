@@ -28,6 +28,8 @@ def _mapping(value: object) -> Mapping[str, Any]:
 
 
 def _number(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
     try:
         result = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
@@ -60,7 +62,7 @@ def _feature_values(entry: Mapping[str, Any]) -> dict[str, Any]:
     greek = _mapping(whale.get("greek_flow"))
     values = {
         "price.close": _number(price.get("value")),
-        "price.return_1d": _number(entry.get("return_1d_pct")),
+        "price.return_1d": (_number(entry.get("return_1d_pct")) / 100 if _number(entry.get("return_1d_pct")) is not None else None),
         "trend.return_5d": _number(technical.get("return_5d")),
         "trend.return_20d": _number(technical.get("return_20d")),
         "trend.return_63d": _number(technical.get("return_63d")),
@@ -74,14 +76,22 @@ def _feature_values(entry: Mapping[str, Any]) -> dict[str, Any]:
         "flow.directional_premium": _number(flow.get("directional_premium")),
         "flow.oi_confirmed": flow.get("oi_confirmed"),
         "gex.gamma_flip": _number(gex.get("gamma_flip")),
-        "gex.flip_distance": _number(gex.get("flip_distance")),
+        "gex.flip_distance": _number(gex.get("distance_to_flip_pct")),
         "greek.dir_delta_flow": _number(greek.get("directional_delta_flow")),
         "greek.dir_vega_flow": _number(greek.get("directional_vega_flow")),
         "model.directional_edge": _number(dimensions.get("directional_edge")),
-        "model.volatility_edge": _number(dimensions.get("volatility_edge")),
+        "model.long_volatility_attractiveness": _number(dimensions.get("long_volatility_attractiveness")),
         "thesis.direction": thesis.get("direction"),
         "thesis.evidence_score": _number(thesis.get("conviction_score")),
     }
+    volatility = _mapping(whale.get('volatility'))
+    for field in ('iv_30d', 'iv_60d', 'term_slope_30d_to_60d', 'iv_minus_rv'):
+        values['native_volatility.' + field] = _number(volatility.get(field))
+    values['greek.coverage_status'] = greek.get('coverage_status')
+    values['greek.confirmation_eligible'] = greek.get('confirmation_eligible')
+    for benchmark, context in _mapping(entry.get('benchmark_context')).items():
+        for horizon, value in _mapping(_mapping(context).get('returns')).items():
+            values[f'relative.{benchmark}.{horizon}d'] = _number(value)
     return values
 
 
@@ -168,7 +178,7 @@ def build(run: Mapping[str, Any], *, feature_database: Path, evaluation_database
                 continue
             session = date.fromisoformat(str(price.get("as_of"))[:10])
             edge = _mapping(entry.get("edge"))
-            version = str(edge.get("feature_version") or "edge-research-unknown")
+            version = str(edge.get("feature_version") or "edge-research-unknown") + "/research-fields-v2"
             for key in ("forecast", "forecast_v4"):
                 model = _mapping(edge.get(key))
                 if model.get("model_version"):
@@ -189,6 +199,11 @@ def build(run: Mapping[str, Any], *, feature_database: Path, evaluation_database
         replay = mart.manifest(replay_id)
     return {
         "schema_version": "codex-screener-research-control-v1",
+        "feature_contract": {
+            "version": "research-fields-v2",
+            "units": {"price.return_1d": "fractional_return", "trend.return_*": "fractional_return", "relative.*": "fractional_return", "gex.flip_distance": "percentage_points", "model.*": "score_0_to_100", "greek.dir_delta_flow": "provider_delta_exposure_session_sum", "greek.dir_vega_flow": "provider_vega_exposure_session_sum", "native_volatility.*": "fractional_annualized_volatility"},
+            "eligibility": "Context features are not active model inputs. Greek coverage must be complete before comparative use. Validate date-blocked out-of-sample increments against market/sector baselines before promotion.",
+        },
         "run_id": run_id,
         "cutoff_at": str(run.get("cutoff_at")),
         "feature_database": str(feature_database),

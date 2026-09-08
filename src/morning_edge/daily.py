@@ -35,6 +35,8 @@ from .freshness import dataset_freshness
 from .models import payload_digest, timestamp_from_text, timestamp_text, utc_timestamp
 from .normalization import EvidenceBundle, EvidenceReader, SourceRef
 from .option_research import shadow_option_research
+from .data_health import chain_quality, run_health
+from .benchmarks import BENCHMARKS, relative_context
 
 
 MORNING_RUN_SCHEMA_VERSION = "morning_run/v1"
@@ -201,7 +203,8 @@ def _reference_contracts(database: str | Path, ticker: str, cutoff_at: datetime,
         dte = (expiry - cutoff_at.astimezone(MARKET_TIMEZONE).date()).days
         if not 30 <= dte <= 240:
             continue
-        quote_at = _timestamp(row.get("last_tape_time"))
+        quote_at = _timestamp(row.get("quote_time", row.get("nbbo_timestamp")))
+        last_trade_at = _timestamp(row.get("last_tape_time"))
         quote_age = (cutoff_at - quote_at).total_seconds() if quote_at is not None else None
         fresh = quote_age is not None and 0 <= quote_age <= QUOTE_FRESHNESS_SECONDS
         mid = (bid + ask) / 2
@@ -222,6 +225,8 @@ def _reference_contracts(database: str | Path, ticker: str, cutoff_at: datetime,
             "theta": theta, "vega": vega, "implied_volatility": _finite_number(row.get("implied_volatility", row.get("iv"))),
             "open_interest": int(oi), "volume": int(_finite_number(row.get("volume")) or 0),
             "quote_at": timestamp_text(quote_at) if quote_at else None, "quote_age_seconds": round(quote_age, 3) if quote_age is not None else None,
+            "quote_timestamp_status": "OBSERVED" if quote_at else "UNAVAILABLE_NOT_LAST_TRADE_TIME",
+            "last_trade_at": timestamp_text(last_trade_at) if last_trade_at else None,
             "quote_fresh": fresh, "source_snapshot_id": snapshot_id, "source_retrieved_at": timestamp_text(retrieved_at),
             "status": "NOT_ELIGIBLE", "reason": "Reference-only contract; no calibrated directional thesis or execution validation.",
         }))
@@ -579,9 +584,16 @@ def _ticker_record(
     current_snapshot_ids = [
         item["snapshot_id"] for item in collection["datasets"] if item["snapshot_id"] is not None
     ]
+    latest_chain = _latest_chain_snapshot(database, ticker, cutoff_at)
+    field_sources = {'price': [bar.source_snapshot_id for bar in reader.normalize_bars(ticker, cutoff_at=cutoff_at)[-1:]], 'technical': sorted({bar.source_snapshot_id for bar in reader.normalize_bars(ticker, cutoff_at=cutoff_at)})}
+    for name, section in edge.items():
+        if isinstance(section, Mapping) and section.get('source_snapshot_ids'):
+            field_sources['edge.' + name] = section['source_snapshot_ids']
     positions_for_ticker = [dict(item) for item in positions if str(item.get("ticker", "")).upper() == ticker]
     return {
         "ticker": ticker,
+        "chain_quality": chain_quality(_rows(latest_chain[2]) if latest_chain else [], spot=technical['latest_regular_close'], as_of=cutoff_at.date()),
+        "field_source_snapshot_ids": field_sources,
         "action": "NO_RECOMMENDATION",
         "gates": {"data_ready": False, "calibrated": False, "execution_ready": False},
         "decision": {
@@ -697,9 +709,16 @@ def build_morning_run(
             _ticker_record(reader, edge_analyzer, database, capture_report, ticker, cutoff, positions)
             for ticker in symbols
         ]
+        for benchmark in BENCHMARKS:
+            bars = reader.normalize_bars(benchmark, cutoff_at=cutoff)
+            simple = [{'date': bar.session_date.isoformat(), 'close': bar.close} for bar in bars]
+            for record in records:
+                context = relative_context(record['technical']['bars'], simple)
+                context['source_snapshot_ids'] = sorted({bar.source_snapshot_id for bar in bars})
+                record.setdefault('benchmark_context', {})[benchmark] = context
     regime = _watchlist_regime(records)
     run_key = {"schema": MORNING_RUN_SCHEMA_VERSION, "cutoff_at": timestamp_text(cutoff), "tickers": list(symbols), "capture_snapshot_ids": [item.snapshot_id for item in capture_report.results if item.snapshot_id is not None]}
-    return {
+    result = {
         "run_schema_version": MORNING_RUN_SCHEMA_VERSION,
         "run_id": f"morning-{cutoff.strftime('%Y%m%dT%H%M%SZ')}-{payload_digest(run_key)[:12]}",
         "generated_at": timestamp_text(cutoff), "cutoff_at": timestamp_text(cutoff), "mode": "SHADOW_READ_ONLY",
@@ -710,6 +729,8 @@ def build_morning_run(
         "watchlist_regime": regime,
         "capture_report": capture_report.to_dict(), "watchlist": records,
     }
+    result['data_health'] = run_health(result)
+    return result
 
 
 def write_morning_run(path: str | Path, artifact: Mapping[str, Any]) -> Path:

@@ -20,6 +20,16 @@ Polling reads the small `data/live-status.json` manifest first. It downloads
 applying the payload. Replay pauses polling until the user selects Live. An
 in-flight refresh cannot replace a newly selected replay.
 
+The collector also writes `data/pipeline-status.json`. This describes the latest
+attempt, independently of the last successful publication. A failed capture
+does not replace `latest.json`.
+
+The latest payload contains compact watchlist entries. Price histories and
+option detail load only for selected tickers from content-hashed files under
+`data/details/`. The browser verifies each digest before displaying detail.
+`--local-only` still writes immutable dated JSON and a replay manifest; a
+portable HTML export is not required. Use `--require-ready` for daily release.
+
 Base and enhanced captures must share a completed-capture cutoff. The renderer
 rejects an enhanced sidecar whose retrieval times exceed the run cutoff.
 

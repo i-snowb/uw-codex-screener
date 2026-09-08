@@ -24,11 +24,18 @@ Successful base and enhanced captures use one shared end-of-capture cutoff.
 
 1. Confirm that the day is a regular NYSE session. On a weekend or market
    holiday, do not call the provider. Report `MARKET_CLOSED` instead.
-2. Run the explicit bounded live morning command with `--live` and
-   `--audit-accepted`. It captures both the base and enhanced datasets and
+2. Run `PYTHONPATH=src python3 scripts/run_daily_capture.py --live --audit-accepted`.
+   Without these flags it is a network-free plan. The gateway captures five
+   benchmark OHLC series, then both the base and enhanced datasets, and
    writes a source-linked `*-enhanced.json` sidecar. Use standalone
    `enhanced-capture` only for selective refreshes. Store all artifacts under
    `outputs/runs/YYYY-MM-DD/` under the configured private runtime root.
+   The default 14-ticker plan is 320 logical requests and at most 960 transport
+   attempts. Preserve the 7,000 reserve. It refuses an existing output path;
+   use a new attempt filename for recovery. It records last-attempt stage and
+   diagnostics in `dashboard-app/data/pipeline-status.json`. A
+   `BLOCKED` or `FAILED` result must not be published. Success here means
+   `AWAITING_VALIDATED_ENRICHMENT`, not finished publication.
 3. Audit the normalized artifact before analysis:
    - capture count and dataset status;
    - actual provider market dates for chain, GEX, OI, flow, dark pool, OHLC,
@@ -37,8 +44,11 @@ Successful base and enhanced captures use one shared end-of-capture cutoff.
      dark-pool-level, market-tide, sector-tide, and latest short-data dates;
    - all recommendation, calibration, and execution gates;
    - current capture snapshot IDs.
-4. Split the configured watchlist into bounded analyst batches. Each analyst can use only
-   fields and current snapshot IDs in the base artifact. Each record must:
+4. Process the configured watchlist in bounded batches without delegation.
+   Use only fields in this artifact and `provenance.analysis_snapshot_ids`.
+   These include cutoff-verified enhanced sources. Use
+   `field_source_snapshot_ids` to cite sources associated with each claim's
+   actual field, not an unrelated valid ticker snapshot. Each record must:
    - keep `action` equal to `NO_RECOMMENDATION`;
    - distinguish prior-session evidence from current-session evidence;
    - give BULL, BASE, and BEAR conditional scenarios without probabilities;
@@ -69,23 +79,24 @@ Successful base and enhanced captures use one shared end-of-capture cutoff.
    outcomes exist, score only horizons available in a subsequent stored run,
    and write `outputs/model-evaluation-summary.json`. Missing matching option
    quotes stay unavailable; they must not become zero returns.
-7. Rebuild the final self-contained dashboard from the enriched JSON, enhanced
-   sidecar, and evaluation summary with
-   `scripts/build_enriched_morning_dashboard.py`. Write the date-stamped view to
-   an owner-private operator-selected path outside the public repository, then
-   display that exact file in the same task.
-8. Build the separate local app and portable archive with
-   `scripts/build_dashboard_bundle.py`. The app must load normalized prepared
+7. Build the point-in-time research control record with
+   `scripts/build_research_control_plane.py`. Retain versioned units, benchmark
+   returns and Greek-flow coverage. Do not treat context features as validated
+   predictors or register retrospective recalculations as prospective.
+8. Publish the local app with `scripts/build_dashboard_bundle.py --local-only
+   --require-ready`. The app must load normalized prepared
    data from `dashboard-app/data/latest.json`; it must not load a provider key
-   or call a provider. Write a dated immutable data file and manifest. Never
-   overwrite an existing file under `artifacts/archive/`.
+   or call a provider. This writes a dated immutable data file, manifest, replay
+   index and on-demand content-hashed ticker detail. Never overwrite a dated
+   publication or an existing file under `artifacts/archive/`. Do not build,
+   attach or open a portable/inline dashboard unless explicitly requested.
 9. Run the targeted tests and static dashboard checks. Confirm:
    - every configured watchlist entry is present;
    - all entries are provenance validated;
    - every action remains `NO_RECOMMENDATION` unless a future, separately
      approved calibrated execution policy is implemented;
-   - the portable HTML is below 2 MB, contains no network calls, and its JavaScript
-     parses successfully;
+   - `node --check dashboard-app/assets/app.js` succeeds; the latest manifest
+     hash and every referenced detail hash match their files;
    - market context, watchlist decisions, selected-stock evidence, and model results
      remain in separate labeled sections;
    - evaluation rows retain their original run ID, cutoff, source IDs, model
@@ -93,7 +104,10 @@ Successful base and enhanced captures use one shared end-of-capture cutoff.
    - no evaluation status claims calibration until the minimum sample,
      chronological stability, leakage, and friction gates pass;
    - output files are owner-private.
-10. Post a compact same-task update with the run timestamp, actual evidence
+10. Verify HTTP 200 from `http://127.0.0.1:8765/`. Start
+    `python3 scripts/serve_dashboard.py --host 127.0.0.1 --port 8765` if needed.
+    Open the verified URL in Chrome. Keep the Mac powered on and Codex running
+    for local scheduled execution. Post a compact same-chat update with the run timestamp, actual evidence
    dates, quota use, failed or empty datasets, and links to the final JSON and
    dashboard. Never print credentials.
 
@@ -113,12 +127,9 @@ PYTHONPATH=src python3 scripts/update_model_evaluations.py \
   --runs-root outputs/runs/YYYY-MM-DD \
   --output outputs/model-evaluation-summary.json
 
-PYTHONPATH=src python3 scripts/build_enriched_morning_dashboard.py \
+PYTHONPATH=src python3 scripts/build_research_control_plane.py \
   --input outputs/runs/YYYY-MM-DD/morning-run-enriched.json \
-  --enhanced-input outputs/runs/YYYY-MM-DD/morning-run-enhanced.json \
-  --evaluation-input outputs/model-evaluation-summary.json \
-  --previous-input outputs/runs/PREVIOUS-SESSION/morning-run-enriched.json \
-  --output outputs/runs/YYYY-MM-DD/morning-dashboard-enriched.html
+  --output outputs/research-control/YYYY-MM-DD.json
 
 PYTHONPATH=src python3 scripts/build_dashboard_bundle.py \
   --input outputs/runs/YYYY-MM-DD/morning-run-enriched.json \
@@ -126,7 +137,7 @@ PYTHONPATH=src python3 scripts/build_dashboard_bundle.py \
   --evaluation-input outputs/model-evaluation-summary.json \
   --previous-input outputs/runs/PREVIOUS-SESSION/morning-run-enriched.json \
   --app-root dashboard-app \
-  --local-only
+  --local-only --require-ready
 ```
 
 The scheduled workflow publishes to the local browser app only. Build a
@@ -135,3 +146,22 @@ portable single-file archive separately, and only when a user requests one.
 Use the most recent earlier regular-session artifact for `--previous-input`.
 Omit the argument only when no prepared prior run exists. The dashboard then
 labels the daily score comparison unavailable instead of reconstructing it.
+
+## Evidence boundaries
+
+Session freshness is `LATEST_EXPECTED_SESSION`, not full-window completeness.
+Check base capture results, provider observation dates, pagination coverage,
+chain field coverage and model eligibility separately. Bounded latest flow and
+dark-pool feeds are context; do not use them for complete-session percentiles.
+Short interest and borrow retain explicit reporting dates and remain lagged
+context. A recent last trade does not establish bid/ask quote age.
+
+Greek flow sums distinct REST minute buckets. Incomplete, conflicting or
+prior-session buckets cannot provide intraday confirmation. An identical
+duplicate is deduplicated; an ambiguous revision fails the derivation.
+
+For September 8, 2026 premarket, the expected completed session is September 4.
+September 7 is closed. If provider market dates have not advanced, keep the
+last successful publication and report the failed readiness gate. Recovery of
+September 2–4 evidence must retain actual retrieval times and retrospective
+eligibility; it cannot repair the historical prospective record.

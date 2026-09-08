@@ -17,9 +17,11 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
     def end_headers(self) -> None:
         path = self.path.partition("?")[0]
-        if path in {"/", "/index.html", "/assets/app.css", "/assets/app.js", "/data/latest.json", "/data/live-status.json"}:
+        if path in {"/", "/index.html", "/assets/app.css", "/assets/app.js", "/data/latest.json", "/data/live-status.json", "/data/pipeline-status.json", "/data/publications.json"}:
             self.send_header("Cache-Control", "no-store, max-age=0")
             self.send_header("Pragma", "no-cache")
+        elif path.startswith('/data/details/'):
+            self.send_header('Cache-Control', 'private, max-age=31536000, immutable')
         super().end_headers()
 
 

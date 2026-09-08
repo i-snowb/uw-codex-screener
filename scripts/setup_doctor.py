@@ -4,16 +4,20 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, UTC
+import hashlib
 import json
 import os
 from pathlib import Path
 import sqlite3
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from morning_edge.config import Settings  # noqa: E402
+from morning_edge.freshness import latest_complete_session
 
 
 def _load_env(path: Path) -> None:
@@ -48,8 +52,26 @@ def inspect(*, env_file: Path, database: Path | None, app_root: Path) -> dict[st
         finally:
             connection.close()
     checks["required_snapshot_table"] = "snapshots" in tables
+    writable = {}
+    for name, directory in {'database': database.parent, 'dashboard': app_root, 'outputs': ROOT / 'outputs'}.items():
+        try:
+            with tempfile.TemporaryFile(dir=directory):
+                writable[name] = True
+        except OSError:
+            writable[name] = False
+    checks['runtime_write_probe'] = all(writable.values())
+    publication = {}
+    latest, manifest = app_root / 'data/latest.json', app_root / 'data/live-status.json'
+    if latest.is_file() and manifest.is_file():
+        data, status = json.loads(latest.read_text()), json.loads(manifest.read_text())
+        checks['publication_hash_matches'] = hashlib.sha256(latest.read_bytes()).hexdigest() == status.get('sha256')
+        publication = {'cutoff_at': data.get('asOf'), 'expected_complete_session': latest_complete_session(datetime.now(UTC)).isoformat(), 'mode': data.get('mode'), 'data_health': data.get('dataHealth', {}).get('status', 'UNMEASURED')}
+    else:
+        checks['publication_hash_matches'] = False
     passed = all(value is True for value in checks.values())
-    return {"status": "READY" if passed else "NEEDS_ATTENTION", "checks": checks, "database_tables": tables}
+    return {"status": "LOCALLY_CONFIGURED" if passed else "NEEDS_ATTENTION", "checks": checks, "write_probes": writable, "publication": publication, "database_tables": tables,
+            "provider_access": "NOT_TESTED", "network_called": False,
+            "boundary": "Local checks do not establish provider connectivity, freshness, scheduler execution or readiness for a future run."}
 
 
 def main() -> int:
@@ -63,7 +85,7 @@ def main() -> int:
     except (OSError, PermissionError, sqlite3.Error) as error:
         result = {"status": "FAILED_CLOSED", "error": str(error)}
     print(json.dumps(result, indent=2, sort_keys=True))
-    return 0 if result["status"] == "READY" else 2
+    return 0 if result["status"] == "LOCALLY_CONFIGURED" else 2
 
 
 if __name__ == "__main__":

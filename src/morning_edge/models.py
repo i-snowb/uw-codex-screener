@@ -43,6 +43,8 @@ class Dataset(StrEnum):
     NEWS = "news"
     EARNINGS = "earnings"
     CATALYST = "catalyst"
+    CORPORATE_ACTION = "corporate_action"
+    SECURITY_IDENTITY = "security_identity"
     POSITION = "position"
     SOCIAL_SENTIMENT = "social_sentiment"
     PROVIDER_AUDIT = "provider_audit"

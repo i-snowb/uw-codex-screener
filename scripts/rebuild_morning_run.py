@@ -59,6 +59,7 @@ def main() -> None:
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--database", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--enhanced-input", type=Path, help="Recompute an attached stored enhanced capture under an explicitly extended retrospective cutoff")
     args = parser.parse_args()
     if args.input.resolve() == args.output.resolve() or args.output.exists():
         raise SystemExit("reprocessed output must be a new path; original publications are immutable")
@@ -69,12 +70,27 @@ def main() -> None:
     report = _report(source.get("capture_report"))
     if not report.preflight_passed or any(item.status not in {CurrentCaptureStatus.CAPTURED, CurrentCaptureStatus.EMPTY} for item in report.results):
         raise SystemExit("cannot rebuild an incomplete capture as a successful research run")
-    artifact = build_morning_run(database=args.database, capture_report=report,
-        cutoff_at=timestamp_from_text(str(source["cutoff_at"])))
+    cutoff = timestamp_from_text(str(source['cutoff_at']))
+    enhanced_report = None
+    if args.enhanced_input:
+        enhanced_report = json.loads(args.enhanced_input.read_text())['capture_report']
+        items = enhanced_report['results']
+        if not items or any(item['status'] not in {'captured', 'empty'} for item in items):
+            raise ValueError('enhanced reprocessing requires a complete stored capture')
+        cutoff = max([cutoff, *(timestamp_from_text(item['fetched_at']) for item in items if item.get('fetched_at'))])
+    artifact = build_morning_run(database=args.database, capture_report=report, cutoff_at=cutoff)
+    if enhanced_report:
+        from morning_edge.enhanced_features import build_enhanced_summary
+        from morning_edge.evidence_join import attach_enhanced
+        enhanced = build_enhanced_summary(args.database, snapshot_ids=[item['snapshot_id'] for item in enhanced_report['results'] if item.get('snapshot_id')], cutoff_at=cutoff)
+        enhanced['capture_report'] = enhanced_report
+        artifact = attach_enhanced(artifact, enhanced)
+        write_morning_run(args.output.with_name(args.output.stem + '-enhanced.json'), enhanced)
     artifact["run_id"] += "-reprocessed-" + artifact["edge_feature_version"]
     artifact["mode"] = "RETROSPECTIVE_REPROCESSING"
     artifact["reprocessing"] = {
         "source_run_id": source.get("run_id"),
+        "source_cutoff_at": source.get("cutoff_at"),
         "reprocessed_at": datetime.now(UTC).isoformat(),
         "prospective_eligible": False,
         "boundary": "Recomputed from stored cutoff-safe evidence; not a new prospective prediction or live capture.",

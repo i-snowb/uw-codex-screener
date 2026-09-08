@@ -30,7 +30,8 @@ class EnhancedFeatureTests(unittest.TestCase):
         ]
         result = summarize_greek_flow(rows)
 
-        self.assertEqual(-8.0, result["directional_delta_flow"])
+        self.assertEqual(-10.0, result["directional_delta_flow"])
+        self.assertEqual(-8.0, result["latest_minute"]["dir_delta_flow"])
         self.assertEqual(0.6, result["delta_sign_persistence"])
         self.assertNotIn("probability", result)
 
