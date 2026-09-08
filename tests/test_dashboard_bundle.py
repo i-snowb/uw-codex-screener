@@ -20,6 +20,17 @@ SPEC.loader.exec_module(MODULE)
 
 
 class DashboardBundleTests(unittest.TestCase):
+    def test_evening_utc_cutoff_archives_under_eastern_date(self) -> None:
+        run = {'run_id': 'evening-recovery', 'cutoff_at': '2026-09-08T01:33:00Z',
+               'generated_at': '2026-09-08T01:33:00Z', 'mode': 'SHADOW', 'watchlist': []}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archived = MODULE.archive_daily_data(run=run, app_root=root / 'app')
+            self.assertEqual('2026-09-07', archived['run_date'])
+            self.assertTrue((root / 'app/data/2026-09-07/run.json').is_file())
+        with self.assertRaises(ValueError):
+            MODULE._publication_date('2026-09-08T01:33:00')
+
     def test_local_only_cli_updates_shell_and_latest_without_portable_export(self) -> None:
         run = {
             "run_id": "2026-08-31T06:45:00-04:00",

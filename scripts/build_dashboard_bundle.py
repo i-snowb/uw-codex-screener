@@ -15,6 +15,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+from zoneinfo import ZoneInfo
 
 import build_enriched_morning_dashboard as dashboard
 from private_artifacts import write_private_bytes
@@ -49,6 +50,13 @@ def _assert_immutable_compatible(path: Path, content: bytes) -> None:
 
 def _digest(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
+
+
+def _publication_date(value: object) -> str:
+    cutoff = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    if cutoff.tzinfo is None:
+        raise ValueError('publication cutoff requires a timezone')
+    return cutoff.astimezone(ZoneInfo('America/New_York')).date().isoformat()
 
 
 def _split_fragment(fragment: str) -> tuple[str, str, str]:
@@ -296,7 +304,7 @@ def publish_latest_data(*, run: Mapping[str, Any], app_root: Path) -> dict[str, 
 def archive_daily_data(*, run: Mapping[str, Any], app_root: Path) -> dict[str, Any]:
     normalized = dashboard.normalize_run(run)
     content = (json.dumps(normalized, ensure_ascii=False, separators=(',', ':'), sort_keys=True) + '\n').encode()
-    run_date = str(run.get('cutoff_at', normalized.get('asOf')))[:10]
+    run_date = _publication_date(run.get('cutoff_at', normalized.get('asOf')))
     if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', run_date):
         raise ValueError('archive requires an ISO date')
     root = app_root / 'data' / run_date
@@ -321,7 +329,7 @@ def build_bundle(
 ) -> dict[str, Any]:
     normalized = dashboard.normalize_run(run)
     run_id = str(run.get("run_id") or normalized.get("asOf") or "unknown-run")
-    run_date = str(normalized.get("asOf") or run.get("cutoff_at") or run_id)[:10]
+    run_date = _publication_date(normalized.get("asOf") or run.get("cutoff_at") or run_id)
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", run_date):
         raise ValueError("run_id must begin with an ISO date")
 
