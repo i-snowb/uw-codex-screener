@@ -5,7 +5,7 @@ import math
 from typing import Any, Mapping, Sequence
 
 
-VERSION = "rest-minute-greek-flow-v2"
+VERSION = "rest-minute-greek-flow-v3"
 FIELDS = ("dir_delta_flow", "dir_vega_flow", "otm_dir_delta_flow", "otm_dir_vega_flow", "volume", "transactions")
 
 
@@ -26,6 +26,7 @@ def summarize(rows: Sequence[Mapping[str, Any]], *, cutoff_at: datetime | None =
         raise ValueError("Greek-flow cutoff must be timezone-aware")
     buckets: dict[datetime, dict[str, float | None]] = {}
     rejected = 0
+    outside_session = 0
     unfinished = 0
     duplicates = 0
     for row in rows:
@@ -42,7 +43,10 @@ def summarize(rows: Sequence[Mapping[str, Any]], *, cutoff_at: datetime | None =
             continue
         session = market_session(timestamp)
         if not session.is_open_at(timestamp):
-            rejected += 1
+            if session.is_regular_session:
+                outside_session += 1
+            else:
+                rejected += 1
             continue
         values = {field: _number(row.get(field)) for field in FIELDS}
         if timestamp in buckets:
@@ -51,7 +55,7 @@ def summarize(rows: Sequence[Mapping[str, Any]], *, cutoff_at: datetime | None =
             duplicates += 1
         buckets[timestamp] = values
     if not buckets:
-        return {"quality": "empty", "aggregation_version": VERSION, "coverage_status": "UNAVAILABLE", "rejected_rows": rejected}
+        return {"quality": "empty", "aggregation_version": VERSION, "coverage_status": "UNAVAILABLE", "rejected_rows": rejected, "out_of_session_rows_excluded": outside_session}
     last = max(buckets)
     session = market_session(last)
     ordered = sorted((t, row) for t, row in buckets.items() if session.opens_at <= t < session.closes_at)
@@ -80,6 +84,7 @@ def summarize(rows: Sequence[Mapping[str, Any]], *, cutoff_at: datetime | None =
         "session_date": session.session_date.isoformat(),
         "row_count": len(ordered), "expected_minutes": expected, "missing_minutes": missing,
         "duplicate_rows_removed": duplicates, "rejected_rows": rejected,
+        "out_of_session_rows_excluded": outside_session,
         "unfinished_or_future_minutes_excluded": unfinished,
         "first_timestamp": ordered[0][0].isoformat(), "final_timestamp": last.isoformat(),
         "directional_delta_flow": delta,

@@ -596,10 +596,12 @@ class UnusualWhalesClient:
         return EndpointResponse(endpoint, response)
 
     def economic_calendar(self, *, as_of: date | str | None = None) -> EndpointResponse:
-        """Get scheduled macroeconomic events for one market date."""
+        """Get the provider's calendar window; date filtering is not documented."""
 
+        if as_of is not None:
+            raise ValueError('economic calendar does not support an audited historical date parameter')
         endpoint = "/api/market/economic-calendar"
-        response = self._http.get_json(endpoint, params={"date": _market_date(as_of)})
+        response = self._http.get_json(endpoint)
         _require_object_collection(response, endpoint=endpoint)
         return EndpointResponse(endpoint, response)
 

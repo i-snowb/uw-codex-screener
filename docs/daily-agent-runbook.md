@@ -159,6 +159,21 @@ context. A recent last trade does not establish bid/ask quote age.
 Greek flow sums distinct REST minute buckets. Incomplete, conflicting or
 prior-session buckets cannot provide intraday confirmation. An identical
 duplicate is deduplicated; an ambiguous revision fails the derivation.
+Valid pre/post-market minutes are counted separately and excluded from the
+regular-session sum. They do not invalidate a complete 390-minute regular
+session. Malformed timestamps, non-session dates, missing regular minutes and
+conflicting revisions still block confirmation.
+
+The execution-readiness panel is diagnostic. Research publication success is
+not execution approval. It names the still-required independent quote feed,
+risk policy, calibration review, event coverage and reference reconciliation.
+Do not retry a denied corporate-action endpoint as part of the core morning
+capture. Record the HTTP access status and have the account owner review it.
+
+Recovered dark-pool windows use one capture cohort per ticker/date, every
+verified page, tracking-ID deduplication and requested tape-date filtering.
+Bounded samples cannot provide complete-session ratios or day-over-day level
+changes. Complete provider coverage does not mean all off-exchange activity.
 
 For September 8, 2026 premarket, the expected completed session is September 4.
 September 7 is closed. If provider market dates have not advanced, keep the

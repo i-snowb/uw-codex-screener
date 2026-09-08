@@ -321,11 +321,12 @@ def build_enhanced_summary(
         records = connection.execute("""
             SELECT s.id, s.symbol, s.dataset, s.as_of, s.retrieved_at, s.raw_payload_hash, s.metadata_json, p.content_json
             FROM snapshots s JOIN raw_payloads p ON p.content_hash=s.raw_payload_hash
-            WHERE json_extract(s.metadata_json, '$.capture_mode')='enhanced_current'
+            WHERE (json_extract(s.metadata_json, '$.capture_mode')='enhanced_current'
+              OR (? AND json_extract(s.metadata_json, '$.capture_mode')='identified_gap_recovery'))
               AND (? IS NULL OR (julianday(s.retrieved_at) <= julianday(?) AND julianday(s.as_of) <= julianday(?)))
         """ + id_clause + """
             ORDER BY s.id DESC
-        """, (cutoff_text, cutoff_text, cutoff_text, *(selected_ids or ()))).fetchall()
+        """, (selected_ids is not None, cutoff_text, cutoff_text, cutoff_text, *(selected_ids or ()))).fetchall()
         from .normalization import EvidenceReader
         prices: dict[str, float] = {}
         price_sources: dict[str, int] = {}

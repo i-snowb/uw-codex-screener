@@ -180,7 +180,7 @@ function applyPublication(nextData){
   DATA=nextData;
   DATA.publications=publications;
   selected=Math.max(0,DATA.entries.findIndex(item=>item.ticker===selectedTicker));
-  setRunHeader();renderConsensusPulse();renderSystemStatus();renderMacro();renderRanking();renderWatchAlerts();renderWatchControls();renderControls();renderEvaluation();renderPlatformTracking();renderPlatformDetails();renderSelected();
+  setRunHeader();renderConsensusPulse();renderSystemStatus();renderMacro();renderRanking();renderWatchAlerts();renderWatchControls();renderControls();renderEvaluation();renderPlatformTracking();renderPlatformDetails();renderSelected();renderExecutionReadiness();
 }
 async function refreshLatest(){
   if(document.hidden||replayActive||refreshInFlight)return;

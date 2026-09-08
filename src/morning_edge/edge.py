@@ -24,7 +24,7 @@ from .models import timestamp_text, utc_timestamp
 from .normalization import _provider_market_date
 
 
-EDGE_FEATURE_VERSION = "edge-research-v3.1"
+EDGE_FEATURE_VERSION = "edge-research-v3.2"
 ANALOG_MODEL_VERSION = "nearest-analog-v3"
 FORECAST_MODEL_VERSION = "analog-path-ensemble-v3"
 FORECAST_V4_MODEL_VERSION = "volatility-scaled-analog-ensemble-v4"
@@ -207,6 +207,8 @@ class EdgeAnalyzer:
             bid = _number(row.get("nbbo_bid", row.get("bid")))
             ask = _number(row.get("nbbo_ask", row.get("ask")))
             delta = _number(row.get("delta"))
+            if delta is not None and (not -1 <= delta <= 1 or side == 'call' and delta < 0 or side == 'put' and delta > 0):
+                delta = None
             oi = _number(row.get("open_interest"))
             volume = _number(row.get("volume"))
             if side not in {"call", "put"} or expiry is None or strike is None or strike <= 0 or iv is None or iv <= 0:
@@ -219,8 +221,8 @@ class EdgeAnalyzer:
                 spread = (ask - bid) / ((ask + bid) / 2)
             contracts.append({
                 "side": side, "expiry": expiry, "dte": dte, "strike": strike, "iv": iv,
-                "delta": delta, "spread": spread, "oi": max(0.0, oi or 0.0),
-                "volume": max(0.0, volume or 0.0),
+                "delta": delta, "spread": spread, "oi": oi if oi is not None and oi >= 0 else None,
+                "volume": volume if volume is not None and volume >= 0 else None,
             })
         expiries: list[dict[str, Any]] = []
         for expiry in sorted({item["expiry"] for item in contracts}):
@@ -264,8 +266,8 @@ class EdgeAnalyzer:
             "term_slope": (back["atm_iv"] - front["atm_iv"]) if front and back else None,
             "put_call_skew_25d": put_skew,
             "median_spread_pct": median(item["spread"] for item in liquid) if liquid else None,
-            "median_open_interest": median(item["oi"] for item in liquid) if liquid else None,
-            "median_volume": median(item["volume"] for item in liquid) if liquid else None,
+            "median_open_interest": median(values) if (values := [item["oi"] for item in liquid if item["oi"] is not None]) else None,
+            "median_volume": median(values) if (values := [item["volume"] for item in liquid if item["volume"] is not None]) else None,
             "liquid_contract_count": len(liquid),
         }
 
@@ -616,24 +618,72 @@ class EdgeAnalyzer:
         self, ticker: str, cutoff_at: datetime, *, spot: float | None,
         average_daily_dollar_volume: float | None,
     ) -> dict[str, Any]:
-        grouped = self.pages_per_date(self.snapshots(ticker, "dark_pool", cutoff_at))
-        history: list[dict[str, Any]] = []
-        for market_date, snapshots in list(grouped.items())[-20:]:
-            summary = self._dark_level(self._unique_dark_rows(snapshots), spot)
-            history.append({"date": market_date.isoformat(), "snapshot_ids": [item.snapshot_id for item in snapshots], **summary})
+        cohorts: dict[tuple[str, ...], list[RawSnapshot]] = defaultdict(list)
+        for snapshot in self.snapshots(ticker, "dark_pool", cutoff_at):
+            meta = snapshot.metadata
+            key = (str(meta['backfill_plan_id']), str(meta['backfill_item_key'])) if (
+                meta.get('pagination_family') == 'dark_pool_cursor'
+                and meta.get('backfill_plan_id') and meta.get('backfill_item_key')
+            ) else (str(snapshot.snapshot_id),)
+            cohorts[key].append(snapshot)
+        has_events = self._connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='backfill_events'").fetchone()
+        by_date: dict[date, dict[str, Any]] = {}
+        for key, candidates in cohorts.items():
+            newest = candidates[0]
+            market_date = newest.market_date
+            selected, complete = [newest], False
+            if len(key) == 2:
+                pages: dict[int, RawSnapshot] = {}
+                for snapshot in candidates:
+                    pages.setdefault(int(snapshot.metadata.get('pagination_page', 0)), snapshot)
+                selected = [pages[page] for page in sorted(pages)]
+                event = self._connection.execute(
+                    'SELECT state, details_json FROM backfill_events WHERE plan_id=? AND item_key=? '
+                    'AND julianday(recorded_at)<=julianday(?) ORDER BY id DESC LIMIT 1',
+                    (*key, timestamp_text(cutoff_at)),
+                ).fetchone() if has_events else None
+                details = json.loads(event['details_json']) if event else {}
+                expected = details.get('pages_captured', int(details.get('page', -1)) + 1)
+                complete = bool(event and event['state'] in {'collected', 'empty'} and sorted(pages) == list(range(expected)))
+            rows, excluded = [], 0
+            for row in self._unique_dark_rows(selected):
+                try:
+                    observed = datetime.fromisoformat(str(row.get('executed_at', '')).replace('Z', '+00:00'))
+                    if observed.tzinfo is None:
+                        raise ValueError('missing timezone')
+                    if observed.astimezone(NEW_YORK).date() != market_date:
+                        excluded += 1
+                        continue
+                except ValueError:
+                    complete = False
+                    if len(key) == 2:
+                        excluded += 1
+                        continue
+                rows.append(row)
+            summary = self._dark_level(rows, spot)
+            if not rows and not complete:
+                summary['aggregate_premium'] = None
+            by_date.setdefault(market_date, {'date': market_date.isoformat(),
+                'snapshot_ids': sorted(item.snapshot_id for item in selected),
+                'coverage_status': 'COMPLETE_SESSION' if complete else 'PARTIAL_OR_UNVERIFIED',
+                'comparison_eligible': complete, 'excluded_rows': excluded, **summary})
+        history = [by_date[day] for day in sorted(by_date)[-20:]]
         if not history:
             return {"status": "UNAVAILABLE", "history_sessions": 0, "source_snapshot_ids": []}
         latest = dict(history[-1]); previous = history[-2] if len(history) > 1 else None
+        comparable = bool(previous and latest['comparison_eligible'] and previous['comparison_eligible']
+            and next_nyse_session(date.fromisoformat(previous['date']), include_current=False).isoformat() == latest['date'])
         level = latest.get("dominant_price_level")
         latest.update({
             "status": "PRICE_RESPONSE_CONTEXT_ONLY", "history_sessions": len(history),
-            "dominant_level_change": (level - previous["dominant_price_level"]) if previous and level is not None and previous.get("dominant_price_level") is not None else None,
+            "dominant_level_change": (level - previous["dominant_price_level"]) if comparable and level is not None and previous.get("dominant_price_level") is not None else None,
+            "comparison_status": 'COMPARABLE' if comparable else 'INCOMPLETE_OR_NONCONSECUTIVE_WINDOWS',
             "distance_to_dominant_level_pct": (spot / level - 1) if spot and level else None,
             "price_state": "ABOVE_LEVEL" if spot and level and spot > level else "BELOW_LEVEL" if spot and level else "UNKNOWN",
-            "premium_to_adv_ratio": latest.get("aggregate_premium") / average_daily_dollar_volume if latest.get("aggregate_premium") and average_daily_dollar_volume else None,
+            "premium_to_adv_ratio": latest.get("aggregate_premium") / average_daily_dollar_volume if latest['comparison_eligible'] and latest.get("aggregate_premium") is not None and average_daily_dollar_volume else None,
             "history": history,
             "source_snapshot_ids": sorted({sid for item in history for sid in item["snapshot_ids"]}),
-            "method": "Premium-weighted 0.25%-of-spot price buckets; print location does not identify beneficial owner or intent",
+            "method": "One capture cohort per market date; all verified pages, tracking-ID deduplication and tape-date filtering. Complete provider windows are not the entire market. Price buckets do not identify beneficial owner or intent.",
         })
         return latest
 

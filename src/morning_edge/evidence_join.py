@@ -38,7 +38,7 @@ def attach_enhanced(run: Mapping[str, Any], enhanced: Mapping[str, Any]) -> dict
         evidence['source_snapshots'] = [descriptors[value] for value in ids]
         entry['whale_evidence'] = evidence
         provenance = entry.setdefault('provenance', {})
-        provenance['analysis_snapshot_ids'] = sorted(set(provenance.get('snapshot_ids', [])) | set(ids))
+        provenance['analysis_snapshot_ids'] = sorted(set(provenance.get('analysis_snapshot_ids', provenance.get('snapshot_ids', []))) | set(ids))
         mapping = entry.setdefault('field_source_snapshot_ids', {})
         for group, families in GROUPS.items():
             mapping['whale_evidence.' + group] = sorted({sources[name] for name in families if sources.get(name) is not None})

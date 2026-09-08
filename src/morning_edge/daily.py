@@ -592,7 +592,8 @@ def _ticker_record(
     positions_for_ticker = [dict(item) for item in positions if str(item.get("ticker", "")).upper() == ticker]
     return {
         "ticker": ticker,
-        "chain_quality": chain_quality(_rows(latest_chain[2]) if latest_chain else [], spot=technical['latest_regular_close'], as_of=cutoff_at.date()),
+        "chain_quality": chain_quality(_rows(latest_chain[2]) if latest_chain else [], spot=technical['latest_regular_close'],
+            as_of=date.fromisoformat(edge['option_surface']['market_date']) if edge.get('option_surface', {}).get('market_date') else cutoff_at.date()),
         "field_source_snapshot_ids": field_sources,
         "action": "NO_RECOMMENDATION",
         "gates": {"data_ready": False, "calibrated": False, "execution_ready": False},
@@ -624,6 +625,7 @@ def _ticker_record(
         "options": {"candidates": contracts, "note": f"Up to {MAX_REFERENCE_CONTRACTS_PER_SIDE} contracts per side; spreads above {MAX_REFERENCE_SPREAD_PCT:.0%} of mid are excluded. Every row remains a non-executable reference."},
         "provenance": {
             "as_of": timestamp_text(cutoff_at), "snapshot_ids": current_snapshot_ids,
+            "analysis_snapshot_ids": sorted(set(current_snapshot_ids) | {sid for ids in field_sources.values() for sid in ids}),
             "evidence_source_count": len(evidence.source_refs),
             "provider": _provider_names(database, evidence.source_refs),
         },
