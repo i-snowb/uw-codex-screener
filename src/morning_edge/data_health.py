@@ -87,6 +87,8 @@ def run_health(run: Mapping[str, Any], *, observed_at: datetime | None = None) -
     calendar = run.get('enhanced_contexts', {}).get('economic_calendar', {})
     if calendar.get('quality') != 'observed' or not calendar.get('event_count'):
         warnings.append('Upcoming economic-calendar coverage is unavailable; an empty feed does not mean no event risk')
+    elif calendar.get('coverage') == 'PARTIAL_OFFICIAL_SCHEDULE':
+        warnings.append('Official calendar fallback is partial and time-limited; other macro events remain unverified')
     warnings.append('Corporate-action adjustment basis, security identity and option deliverables remain unreconciled')
     return {'schema_version': 'data-health-v2', 'status': 'BLOCKED' if failures else 'RESEARCH_READY_WITH_LIMITATIONS' if warnings else 'RESEARCH_READY', 'expected_complete_session': expected, 'checked_at': cutoff.isoformat(), 'failures': failures, 'warnings': warnings, 'tickers': rows, 'recommendations_enabled': False}
 
@@ -112,19 +114,40 @@ def assert_publishable(run: Mapping[str, Any], *, observed_at: datetime) -> dict
 def execution_readiness(run: Mapping[str, Any]) -> dict[str, Any]:
     """Expose unsatisfied execution prerequisites; this report cannot authorize trades."""
     health = run_health(run)
+    operational = run.get('operational_context', {})
+    policy = operational.get('risk_policy', {})
+    horizon = run.get('model_evaluation', {}).get('horizons', {}).get('1', {})
+    minimum = run.get('model_evaluation', {}).get('minimum_gates', {})
+    calibration_reason = 'No independently reviewed calibration and promotion artifact is registered. More recovered history cannot create prospective origins.'
+    if horizon:
+        calibration_reason = (f"One-session prospective results: {horizon.get('prospective_evaluated', 0)}/{minimum.get('evaluations_per_horizon', 60)}; "
+            f"distinct origin sessions: {horizon.get('distinct_origin_sessions', 0)}/{minimum.get('distinct_origin_sessions', 60)}. "
+            'Sample maturity, baseline lift, calibration and independent promotion review are all required.')
+    event_reason = 'Historical earnings and a bounded economic calendar do not establish complete upcoming event coverage.'
+    if operational:
+        event_reason = (f"Upcoming earnings dates known for {operational.get('known_upcoming_earnings', 0)}/{len(run.get('watchlist', []))} tickers. "
+            f"Official schedule events: {operational.get('calendar', {}).get('event_count', 0)}; coverage is partial and expires. "
+            'Independent company confirmation and complete relevant event coverage remain required.')
+    reference_reason = 'Corporate actions, security identity, price adjustment basis and option deliverables are not reconciled.'
+    chain_checks = operational.get('diagnostics', {}).get('chain_identity', {})
+    if chain_checks:
+        contracts = sum(row.get('counts', {}).get('contracts', 0) for row in chain_checks.values())
+        matched = sum(row.get('counts', {}).get('identity_fields_match', 0) for row in chain_checks.values())
+        reference_reason = f'OSI identity fields match for {matched}/{contracts} raw contracts. Corporate actions, adjustment basis and OCC deliverables remain unverified.'
     gates = [
         {'id': 'research_data', 'status': 'BLOCKED' if health['failures'] else 'PASS',
          'reason': 'Latest required session and benchmark checks. This is not executable quote validation.'},
         {'id': 'calibration', 'status': 'BLOCKED',
-         'reason': 'No independently reviewed calibration and promotion artifact is registered. More recovered history cannot create prospective origins.'},
+         'reason': calibration_reason},
         {'id': 'execution_quotes', 'status': 'BLOCKED',
          'reason': 'No independent executable bid/ask feed with verified quote timestamps, contract identity and friction checks is integrated.'},
         {'id': 'risk_policy', 'status': 'BLOCKED',
-         'reason': 'No approved policy registry exists for per-trade loss, aggregate correlated risk, expiry, liquidity and event rules.'},
+         'reason': (f"Policy validator: {policy.get('status', 'NOT_CONFIGURED')}; {len(policy.get('errors', []))} missing/invalid inputs. "
+             'User-defined limits and approval are required; a valid draft cannot enable execution.')},
         {'id': 'reference_reconciliation', 'status': 'BLOCKED',
-         'reason': 'Corporate actions, security identity, price adjustment basis and option deliverables are not reconciled.'},
+         'reason': reference_reason},
         {'id': 'event_coverage', 'status': 'BLOCKED',
-         'reason': 'Historical earnings and a bounded economic calendar do not establish complete upcoming event coverage.'},
+         'reason': event_reason},
         {'id': 'order_routing', 'status': 'DISABLED',
          'reason': 'This application is research-only. No orders are placed or routed.'},
     ]
@@ -132,6 +155,8 @@ def execution_readiness(run: Mapping[str, Any]) -> dict[str, Any]:
     for entry in run.get('watchlist', []):
         edge = entry.get('edge', {})
         gaps = []
+        if operational and not entry.get('company_reference', {}).get('next_earnings_date'):
+            gaps.append('upcoming_earnings_unknown')
         if edge.get('open_interest', {}).get('status') != 'DERIVED_FROM_CONSECUTIVE_CHAINS':
             gaps.append('consecutive_chain_oi')
         if not entry.get('whale_evidence', {}).get('greek_flow', {}).get('confirmation_eligible'):
@@ -143,4 +168,5 @@ def execution_readiness(run: Mapping[str, Any]) -> dict[str, Any]:
     return {'schema_version': 'execution-readiness-v1', 'status': 'BLOCKED',
             'execution_ready': False, 'recommendations_enabled': False,
             'gates': gates, 'ticker_context': ticker_gaps,
+            'event_calendar': operational.get('calendar', {}),
             'boundary': 'Diagnostic checklist, not a trading permission or calibration certificate.'}

@@ -20,6 +20,7 @@ from morning_edge.daily import write_morning_run
 from morning_edge.data_health import run_health
 from morning_edge.enhanced_collection import TICKER_DATASETS, GLOBAL_DATASETS
 from morning_edge.freshness import latest_complete_session
+from morning_edge.operational_context import collect_company_context, attach_operational_context
 from morning_edge.providers.budget import WeeklyRequestBudget, API_BASIC_ROLLING_WINDOW
 from morning_edge.providers.unusual_whales import UnusualWhalesClient
 from morning_edge.store import SnapshotStore
@@ -31,7 +32,7 @@ ET = ZoneInfo('America/New_York')
 
 def plan(settings: Settings, now: datetime) -> dict:
     now = now.astimezone(ET)
-    logical = len(settings.watchlist) * (len(CurrentDataset) + len(TICKER_DATASETS)) + len(GLOBAL_DATASETS) + len(BENCHMARKS)
+    logical = len(settings.watchlist) * (len(CurrentDataset) + len(TICKER_DATASETS) + 1) + len(GLOBAL_DATASETS) + len(BENCHMARKS)
     return {'status': 'PLANNED' if is_nyse_session(now.date()) else 'MARKET_CLOSED',
             'observed_at': now.isoformat(), 'expected_complete_session': latest_complete_session(now).isoformat(),
             'watchlist': list(settings.watchlist), 'benchmarks': list(BENCHMARKS),
@@ -80,7 +81,15 @@ def capture(settings: Settings, *, now: datetime, output: Path, app_root: Path) 
                 write_morning_run(output.with_name(output.stem + '-benchmarks.json'), report.to_dict())
                 if not report.preflight_passed or any(item.status.value != 'captured' for item in report.results):
                     return status('FAILED', stage, 'Benchmark capture incomplete; base capture and publication skipped.')
-            benchmark_seconds = time.perf_counter() - started
+                benchmark_seconds = time.perf_counter() - started
+                stage = 'company_context'
+                company_started = time.perf_counter()
+                with SnapshotStore(settings.database_path) as snapshots:
+                    company_results = collect_company_context(client=client, snapshots=snapshots, tickers=settings.watchlist)
+                write_morning_run(output.with_name(output.stem + '-company-context.json'), {'results': company_results})
+                if any(row.get('collection_stopped') for row in company_results):
+                    return status('FAILED', stage, 'Company-context collection circuit opened; no further provider requests.')
+                company_seconds = time.perf_counter() - company_started
             stage = 'capture_and_analysis'
             status('RUNNING', stage, 'Capturing base and enhanced evidence under one cutoff.')
             captured = live_morning_run(settings, tickers=settings.watchlist, datasets=(), audit_accepted=True,
@@ -89,9 +98,25 @@ def capture(settings: Settings, *, now: datetime, output: Path, app_root: Path) 
                 return status('FAILED', stage, 'Base or enhanced collection failed. Inspect the private capture diagnostic.', capture=captured)
             stage = 'health'
             run = json.loads(output.read_text())
+            private = settings.database_path.parent / 'private'
+            def optional_object(name):
+                path = private / name
+                if not path.exists():
+                    return None
+                try:
+                    value = json.loads(path.read_text())
+                    return value if isinstance(value, dict) else None
+                except (ValueError, OSError):
+                    return None
+            with SnapshotStore(settings.database_path) as snapshots:
+                run = attach_operational_context(run, snapshots=snapshots, company_results=company_results,
+                    calendar=optional_object('reviewed-calendar.json'), policy=optional_object('risk-policy.json'))
             health = run_health(run, observed_at=datetime.now(ET))
+            run['data_health'] = health
+            write_morning_run(output, run)
             write_morning_run(output.with_name(output.stem + '-health.json'), health)
-            timings = {'benchmarks_seconds': round(benchmark_seconds, 3), 'capture_and_analysis_seconds': round(time.perf_counter() - started - benchmark_seconds, 3)}
+            timings = {'benchmarks_seconds': round(benchmark_seconds, 3), 'company_context_seconds': round(company_seconds, 3),
+                       'capture_and_analysis_seconds': round(time.perf_counter() - started - benchmark_seconds - company_seconds, 3)}
             if health['failures']:
                 return status('BLOCKED', stage, 'Required market evidence failed health checks; publication prohibited.', health=health, timings=timings)
             return status('AWAITING_VALIDATED_ENRICHMENT', 'enrichment', 'Validate this run, register forecasts, then publish with --require-ready.', artifact_path=str(output), health=health, timings=timings)

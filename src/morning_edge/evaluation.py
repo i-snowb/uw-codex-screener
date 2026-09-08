@@ -332,6 +332,8 @@ def register_run(
     registration_mode = registration_mode.strip().upper()
     if registration_mode not in {"PROSPECTIVE", "RETROSPECTIVE_ARTIFACT_SEED"}:
         raise ValueError("registration_mode must be PROSPECTIVE or RETROSPECTIVE_ARTIFACT_SEED")
+    if run.get('forecast_registration_allowed') is False or run.get('revision_scope') == 'CONTEXT_ONLY_NO_NEW_FORECAST':
+        raise ValueError('context-only revisions cannot register new forecasts')
     if registration_mode == "PROSPECTIVE" and (run.get("reprocessing") or run.get("mode") == "RETROSPECTIVE_REPROCESSING"):
         raise ValueError("reprocessed research cannot be registered as prospective")
     cutoff_at = timestamp_from_text(_text(run.get("cutoff_at")))
@@ -946,6 +948,10 @@ def build_report(database: str | Path) -> dict[str, Any]:
 
 def update_evaluations(database: str | Path, run_paths: Sequence[str | Path]) -> dict[str, Any]:
     runs = [load_run(path) for path in sorted((Path(path) for path in run_paths))]
+    context_only_count = sum(run.get('forecast_registration_allowed') is False or
+        run.get('revision_scope') == 'CONTEXT_ONLY_NO_NEW_FORECAST' for run in runs)
+    runs = [run for run in runs if run.get('forecast_registration_allowed') is not False and
+        run.get('revision_scope') != 'CONTEXT_ONLY_NO_NEW_FORECAST']
     registration = {"registered": 0, "unique_forecasts": 0}
     for index, run in enumerate(runs):
         mode = "PROSPECTIVE" if index == len(runs) - 1 else "RETROSPECTIVE_ARTIFACT_SEED"
@@ -954,5 +960,6 @@ def update_evaluations(database: str | Path, run_paths: Sequence[str | Path]) ->
         registration["unique_forecasts"] += result["unique_forecasts"]
     scoring = evaluate_registered(database, runs)
     report = build_report(database)
-    report["update"] = {"registration": registration, "scoring": scoring, "run_count": len(runs)}
+    report["update"] = {"registration": registration, "scoring": scoring, "run_count": len(runs),
+                        "context_only_runs_skipped": context_only_count}
     return report

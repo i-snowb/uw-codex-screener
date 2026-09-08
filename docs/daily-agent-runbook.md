@@ -26,11 +26,11 @@ Successful base and enhanced captures use one shared end-of-capture cutoff.
    holiday, do not call the provider. Report `MARKET_CLOSED` instead.
 2. Run `PYTHONPATH=src python3 scripts/run_daily_capture.py --live --audit-accepted`.
    Without these flags it is a network-free plan. The gateway captures five
-   benchmark OHLC series, then both the base and enhanced datasets, and
+   benchmark OHLC series, current stock information for each ticker, then both the base and enhanced datasets, and
    writes a source-linked `*-enhanced.json` sidecar. Use standalone
    `enhanced-capture` only for selective refreshes. Store all artifacts under
    `outputs/runs/YYYY-MM-DD/` under the configured private runtime root.
-   The default 14-ticker plan is 320 logical requests and at most 960 transport
+   The default 14-ticker plan is 334 logical requests and at most 1,002 transport
    attempts. Preserve the 7,000 reserve. It refuses an existing output path;
    use a new attempt filename for recovery. It records last-attempt stage and
    diagnostics in `dashboard-app/data/pipeline-status.json`. A
@@ -79,6 +79,9 @@ Successful base and enhanced captures use one shared end-of-capture cutoff.
    outcomes exist, score only horizons available in a subsequent stored run,
    and write `outputs/model-evaluation-summary.json`. Missing matching option
    quotes stay unavailable; they must not become zero returns.
+   Context-only revisions with `forecast_registration_allowed: false` or
+   `revision_scope: CONTEXT_ONLY_NO_NEW_FORECAST` are skipped by batch evaluation
+   and rejected by direct registration. They cannot create additional origins.
 7. Build the point-in-time research control record with
    `scripts/build_research_control_plane.py`. Retain versioned units, benchmark
    returns and Greek-flow coverage. Do not treat context features as validated
@@ -169,6 +172,29 @@ not execution approval. It names the still-required independent quote feed,
 risk policy, calibration review, event coverage and reference reconciliation.
 Do not retry a denied corporate-action endpoint as part of the core morning
 capture. Record the HTTP access status and have the account owner review it.
+
+The daily gateway captures `/api/stock/{ticker}/info` with the shared budget and
+collection circuit. It validates the returned symbol and binds company identity
+and upcoming earnings to immutable, cutoff-verified snapshots. A null earnings
+date is unknown, not evidence that no event exists. Provider identity does not
+verify corporate actions, option deliverables or adjusted price history.
+
+When the provider macro calendar is empty, the gateway can read
+`data/private/reviewed-calendar.json`. This is a reviewed official-source cache,
+not an automatic successful feed. Each entry has an event time and source URL;
+the document has `reviewed_at` and `expires_at`, no more than 24 hours apart.
+Expired, future-dated, malformed or unregistered-source caches fail closed.
+Coverage remains partial. Company conferences remain separate from macro
+releases and earnings. The September 7 recovery used the official BLS monthly
+page because a direct ICS request returned HTTP 403. Refresh the review before
+expiry; never extend its timestamp without actually reviewing the sources.
+
+Current raw chain identity checks compare OSI symbol, root, expiry, strike and
+option type. They do not verify adjusted deliverables. Selected-contract quote
+preflight requires independent quote-update and receipt timestamps, bid/ask
+size, an approved source identity and a complete draft policy. Stored last-trade
+timestamps, smoothed values and retrieval time cannot substitute for quote age.
+The diagnostic never enables execution. See `risk-policy-template.md`.
 
 Recovered dark-pool windows use one capture cohort per ticker/date, every
 verified page, tracking-ID deduplication and requested tape-date filtering.

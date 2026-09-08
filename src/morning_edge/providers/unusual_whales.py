@@ -235,6 +235,18 @@ class UnusualWhalesClient:
             raise ValueError(f"{API_KEY_ENVIRONMENT_VARIABLE} is not set")
         return cls(token, **kwargs)
 
+    def stock_info(self, ticker: str) -> EndpointResponse:
+        """Current company identity and next earnings date; never historical earnings."""
+        symbol = _ticker(ticker)
+        endpoint = f'/api/stock/{symbol}/info'
+        response = self._http.get_json(endpoint)
+        data = response.data
+        if not isinstance(data, Mapping) or data.get('symbol') != symbol or not data.get('full_name'):
+            raise ProviderSchemaError('stock info requires matching symbol and company name')
+        if data.get('next_earnings_date') is not None:
+            _require_iso_date(data['next_earnings_date'], endpoint=endpoint, field='next_earnings_date', index=0)
+        return EndpointResponse(endpoint, response)
+
     def company_reference(self, ticker: str, *, kind: str) -> EndpointResponse:
         """Capture documented corporate-action arrays without inferring adjustments."""
         if kind not in {'splits', 'dividends'}:
