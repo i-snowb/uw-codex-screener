@@ -21,9 +21,10 @@ from zoneinfo import ZoneInfo
 from .challengers import shadow_challengers
 from .clock import next_nyse_session
 from .models import timestamp_text, utc_timestamp
+from .normalization import _provider_market_date
 
 
-EDGE_FEATURE_VERSION = "edge-research-v3"
+EDGE_FEATURE_VERSION = "edge-research-v3.1"
 ANALOG_MODEL_VERSION = "nearest-analog-v3"
 FORECAST_MODEL_VERSION = "analog-path-ensemble-v3"
 FORECAST_V4_MODEL_VERSION = "volatility-scaled-analog-ensemble-v4"
@@ -121,7 +122,9 @@ class EdgeAnalyzer:
         self.close()
 
     @staticmethod
-    def _market_date(metadata: Mapping[str, Any], payload: Any, as_of: str) -> date:
+    def _market_date(metadata: Mapping[str, Any], payload: Any, as_of: str, dataset: str = "") -> date:
+        if dataset in {"option_chain", "option_flow", "ohlc", "open_interest", "dark_pool", "news", "dealer_exposure"}:
+            return _provider_market_date(dataset, metadata, payload, datetime.fromisoformat(as_of.replace("Z", "+00:00")))
         requested = metadata.get("requested_market_date")
         if isinstance(requested, str):
             try:
@@ -166,7 +169,7 @@ class EdgeAnalyzer:
             result.append(
                 RawSnapshot(
                     int(row["id"]), row["dataset"],
-                    self._market_date(metadata, payload, row["as_of"]),
+                    self._market_date(metadata, payload, row["as_of"], row["dataset"]),
                     row["as_of"], row["retrieved_at"], metadata, payload,
                 )
             )
@@ -327,6 +330,15 @@ class EdgeAnalyzer:
             return result
 
         previous, current = snapshots[-2], snapshots[-1]
+        if next_nyse_session(previous.market_date, include_current=False) != current.market_date:
+            return {
+                "status": "NONCONSECUTIVE_CHAIN_HISTORY",
+                "market_date": current.market_date.isoformat(),
+                "previous_market_date": previous.market_date.isoformat(),
+                "history_sessions": len(snapshots),
+                "source_snapshot_ids": [previous.snapshot_id, current.snapshot_id],
+                "method": "Missing intervening session chains; one-session OI changes are unavailable",
+            }
         prior_map, current_map = contract_map(previous), contract_map(current)
         changes: list[tuple[str, float, float]] = []
         for symbol, (side, strike, oi) in current_map.items():

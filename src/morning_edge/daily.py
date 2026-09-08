@@ -704,11 +704,12 @@ def build_morning_run(
     symbols = tuple(str(item).strip().upper() for item in symbols)
     if any(not item for item in symbols):
         raise ValueError("ticker must not be empty")
-    with EvidenceReader(database) as reader, EdgeAnalyzer(database) as edge_analyzer:
-        records = [
-            _ticker_record(reader, edge_analyzer, database, capture_report, ticker, cutoff, positions)
-            for ticker in symbols
-        ]
+    with EvidenceReader(database) as reader:
+        records = []
+        for ticker in symbols:
+            # Reuse raw histories within a ticker, not across the full watchlist.
+            with EdgeAnalyzer(database) as edge_analyzer:
+                records.append(_ticker_record(reader, edge_analyzer, database, capture_report, ticker, cutoff, positions))
         for benchmark in BENCHMARKS:
             bars = reader.normalize_bars(benchmark, cutoff_at=cutoff)
             simple = [{'date': bar.session_date.isoformat(), 'close': bar.close} for bar in bars]
