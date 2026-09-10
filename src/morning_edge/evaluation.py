@@ -332,6 +332,8 @@ def register_run(
     registration_mode = registration_mode.strip().upper()
     if registration_mode not in {"PROSPECTIVE", "RETROSPECTIVE_ARTIFACT_SEED"}:
         raise ValueError("registration_mode must be PROSPECTIVE or RETROSPECTIVE_ARTIFACT_SEED")
+    if run.get('forecast_registration_allowed') is False or run.get('revision_scope') == 'CONTEXT_ONLY_NO_NEW_FORECAST':
+        raise ValueError('context-only revisions cannot register new forecasts')
     if registration_mode == "PROSPECTIVE" and (run.get("reprocessing") or run.get("mode") == "RETROSPECTIVE_REPROCESSING"):
         raise ValueError("reprocessed research cannot be registered as prospective")
     cutoff_at = timestamp_from_text(_text(run.get("cutoff_at")))
@@ -392,6 +394,11 @@ def register_run(
                     "SHADOW_V4", forecast_v4,
                     _text(forecast_v4.get("direction"), "NEUTRAL").upper(), None,
                 ))
+            price_trial = _mapping(edge.get("price_only_trial"))
+            if price_trial.get("status") == "SHADOW_UNCALIBRATED" and _path_targets(price_trial):
+                if cutoff_at < timestamp_from_text(_text(price_trial.get("starts_at"))):
+                    raise ValueError("price trial cannot be backfilled before its activation")
+                variants.append(("SHADOW_PRICE_TRIAL", price_trial, "NEUTRAL", None))
             for raw_challenger in _sequence(challenger_suite.get("models")):
                 challenger = _mapping(raw_challenger)
                 if _path_targets(challenger):
@@ -489,6 +496,8 @@ def register_run(
                             "published_target_date": _text(target.get("date"))[:10],
                             "daily_action": _text(entry.get("action"), "NO_RECOMMENDATION"),
                             "forecast_status": _text(model.get("status"), "UNAVAILABLE"),
+                            "trial_id": model.get("trial_id"),
+                            "trial_features": model.get("features") if model_role == "SHADOW_PRICE_TRIAL" else None,
                             "observed_analog_frequency_is_probability": False,
                             "baseline_directions": baseline_directions,
                             "regime_labels": {"trend": trend_regime, "volatility": volatility_regime},
@@ -566,11 +575,14 @@ def _option_outcome(
     expiry_text = _text(option.get("expiry"))[:10]
     if not contract or entry_ask is None or entry_ask <= 0:
         return None, {"available": False, "reason": "published contract or positive entry ask missing"}
-    if expiry_text and observation.session >= expiry_text and strike is not None:
+    if expiry_text and observation.session > expiry_text:
+        return None, {"available": False, "reason": "exact expiration-session close unavailable; later closes cannot value expiry"}
+    if expiry_text and observation.session == expiry_text and strike is not None:
         intrinsic = max(0.0, observation.close - strike) if option_type == "CALL" else max(0.0, strike - observation.close)
         return (intrinsic / entry_ask - 1.0) * 100.0, {
             "available": True, "entry": entry_ask, "exit": intrinsic,
             "entry_mark": "stored_ask", "exit_mark": "expiration_intrinsic",
+            "execution_validated": False, "costs_included": False,
         }
     later = _mapping(observation.options.get(contract))
     exit_bid = _number(later.get("bid"))
@@ -579,7 +591,7 @@ def _option_outcome(
     return (exit_bid / entry_ask - 1.0) * 100.0, {
         "available": True, "entry": entry_ask, "exit": exit_bid,
         "entry_mark": "stored_ask", "exit_mark": "later_stored_bid",
-        "contract": contract,
+        "contract": contract, "execution_validated": False, "costs_included": False,
     }
 
 
@@ -691,6 +703,7 @@ def build_report(database: str | Path) -> dict[str, Any]:
                 "run_id": metadata.get("run_id"),
                 "published_at": timestamp_text(stored.record.cutoff_at),
                 "origin_session": metadata.get("origin_session"),
+                "origin_close": metadata.get("origin_close"),
                 "horizon_sessions": stored.record.horizon_sessions,
                 "direction": metadata.get("direction_label"),
                 "direction_semantics": metadata.get("direction_semantics", "legacy-terminal-direction"),
@@ -888,6 +901,7 @@ def build_report(database: str | Path) -> dict[str, Any]:
     prospective_evaluated = sum(
         row["status"] == "EVALUATED" and row["registration_mode"] == "PROSPECTIVE" for row in rows
     )
+    from .price_trial import paired_trial_report
     return {
         "evaluation_version": EVALUATION_VERSION,
         "active_model_version": active_model,
@@ -912,6 +926,7 @@ def build_report(database: str | Path) -> dict[str, Any]:
         "ticker_breakdown": ticker_breakdown,
         "conviction_breakdown": conviction_breakdown,
         "model_breakdown": model_breakdown,
+        "price_trial_comparison": paired_trial_report(model_rows),
         "regime_breakdown": regime_breakdown,
         "minimum_gates": {
             "evaluations_per_horizon": MINIMUM_EVALUATIONS_PER_HORIZON,
@@ -927,7 +942,8 @@ def build_report(database: str | Path) -> dict[str, Any]:
             "reason": "Observed analog frequencies are not calibrated probabilities; Brier and log scores are intentionally omitted.",
         },
         "dependence_note": "Ticker outcomes from one origin session share market conditions. Equal-weight origin metrics are the primary maturity read; row-weighted accuracy is diagnostic.",
-        "paper_option_method": "published stored ask to first eligible later stored bid; expiration uses intrinsic value; commissions and additional slippage excluded",
+        "paper_option_method": "published stored ask to first eligible later stored bid; new expiration marks require the exact expiry-session close; commissions and additional slippage excluded; legacy outcomes remain immutable",
+        "execution_validated_option_results": False,
         "limitations": [
             "Direction accuracy is compared with the realized majority-direction baseline.",
             "Retrospectively registered dated artifacts are shown as seed diagnostics and never count toward prospective calibration gates.",
@@ -942,6 +958,10 @@ def build_report(database: str | Path) -> dict[str, Any]:
 
 def update_evaluations(database: str | Path, run_paths: Sequence[str | Path]) -> dict[str, Any]:
     runs = [load_run(path) for path in sorted((Path(path) for path in run_paths))]
+    context_only_count = sum(run.get('forecast_registration_allowed') is False or
+        run.get('revision_scope') == 'CONTEXT_ONLY_NO_NEW_FORECAST' for run in runs)
+    runs = [run for run in runs if run.get('forecast_registration_allowed') is not False and
+        run.get('revision_scope') != 'CONTEXT_ONLY_NO_NEW_FORECAST']
     registration = {"registered": 0, "unique_forecasts": 0}
     for index, run in enumerate(runs):
         mode = "PROSPECTIVE" if index == len(runs) - 1 else "RETROSPECTIVE_ARTIFACT_SEED"
@@ -950,5 +970,6 @@ def update_evaluations(database: str | Path, run_paths: Sequence[str | Path]) ->
         registration["unique_forecasts"] += result["unique_forecasts"]
     scoring = evaluate_registered(database, runs)
     report = build_report(database)
-    report["update"] = {"registration": registration, "scoring": scoring, "run_count": len(runs)}
+    report["update"] = {"registration": registration, "scoring": scoring, "run_count": len(runs),
+                        "context_only_runs_skipped": context_only_count}
     return report

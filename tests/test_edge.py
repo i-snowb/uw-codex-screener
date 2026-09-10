@@ -86,7 +86,7 @@ class EdgeAnalyzerTests(unittest.TestCase):
 
         self.assertEqual("RESEARCH_ONLY", result["option_surface"]["status"])
         self.assertGreater(result["option_surface"]["history_sessions"], 8)
-        self.assertEqual("DERIVED_FROM_CONSECUTIVE_CHAINS", result["open_interest"]["status"])
+        self.assertEqual("NONCONSECUTIVE_CHAIN_HISTORY", result["open_interest"]["status"])
         self.assertGreater(result["flow_conviction"]["directional_premium"], 0)
         self.assertEqual("ABOVE_FLIP", result["gex_topology"]["spot_regime"])
         self.assertAlmostEqual(130, result["dark_pool"]["dominant_price_level"], delta=.2)
@@ -94,6 +94,43 @@ class EdgeAnalyzerTests(unittest.TestCase):
         self.assertFalse(result["calibration"]["ready"])
         self.assertFalse(result["dimensions"]["calibrated_probability_available"])
         json.dumps(result)
+
+    def test_holiday_chain_uses_provider_session_for_surface_tenor(self) -> None:
+        observed = datetime(2026, 9, 7, 22, tzinfo=UTC)
+        rows = self.chain(date(2026, 9, 4), 100, 1000, 900)
+        for row in rows:
+            row['last_tape_time'] = '2026-09-04T19:59:00Z'
+        self.store.insert(SnapshotEnvelope(provider='test', dataset=Dataset.OPTION_CHAIN,
+            symbol='QCOM', as_of=observed, retrieved_at=observed,
+            payload={'data': rows}, metadata={'capture_mode': 'current'}))
+        with EdgeAnalyzer(self.database) as analyzer:
+            result = analyzer.option_surface('QCOM', observed, spot=100,
+                bars=[{'date': '2026-09-04', 'close': 100}], realized_vol_20=.3)
+        self.assertEqual('2026-09-04', result['market_date'])
+        self.assertEqual(60, result['front_dte'])
+        self.assertEqual('2026-09-04', result['history'][0]['date'])
+
+    def test_chain_oi_requires_adjacent_market_sessions_not_adjacent_captures(self) -> None:
+        cutoff = datetime(2026, 9, 8, 22, tzinfo=UTC)
+        for day in (date(2026, 9, 1), date(2026, 9, 4)):
+            observed = datetime.combine(day, datetime.min.time(), UTC)
+            self.store.insert(SnapshotEnvelope(provider='test', dataset=Dataset.OPTION_CHAIN,
+                symbol='QCOM', as_of=observed, retrieved_at=observed,
+                payload={'data': self.chain(day, 100, 1000, 900)},
+                metadata={'requested_market_date': day.isoformat()}))
+        with EdgeAnalyzer(self.database) as analyzer:
+            result = analyzer.oi_structure('QCOM', cutoff, spot=100)
+        self.assertEqual('NONCONSECUTIVE_CHAIN_HISTORY', result['status'])
+        self.assertIsNone(result.get('call_oi_change'))
+        day = date(2026, 9, 8)
+        observed = datetime.combine(day, datetime.min.time(), UTC)
+        self.store.insert(SnapshotEnvelope(provider='test', dataset=Dataset.OPTION_CHAIN,
+            symbol='QCOM', as_of=observed, retrieved_at=observed,
+            payload={'data': self.chain(day, 100, 1000, 900)},
+            metadata={'requested_market_date': day.isoformat()}))
+        with EdgeAnalyzer(self.database) as analyzer:
+            result = analyzer.oi_structure('QCOM', cutoff, spot=100)
+        self.assertEqual('DERIVED_FROM_CONSECUTIVE_CHAINS', result['status'])
 
     def test_premarket_flow_uses_provider_row_date_not_retrieval_date(self) -> None:
         cutoff = datetime(2026, 8, 25, 11, 35, tzinfo=UTC)

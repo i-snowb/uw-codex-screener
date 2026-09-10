@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 import json
+import math
 from pathlib import Path
 import sqlite3
 from statistics import fmean
@@ -18,7 +19,8 @@ def _number(value: Any) -> float | None:
     if isinstance(value, bool) or value is None:
         return None
     try:
-        return float(value)
+        result = float(value)
+        return result if math.isfinite(result) else None
     except (TypeError, ValueError):
         return None
 
@@ -73,34 +75,9 @@ def summarize_greek_exposure(rows: Sequence[Mapping[str, Any]], *, spot: float |
     }
 
 
-def summarize_greek_flow(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    ordered = sorted((row for row in rows if row.get("timestamp")), key=lambda row: str(row["timestamp"]))
-    if not ordered:
-        return {"quality": "empty"}
-    final = ordered[-1]
-    final_delta = _number(final.get("dir_delta_flow"))
-    final_vega = _number(final.get("dir_vega_flow"))
-    otm_delta = _number(final.get("otm_dir_delta_flow"))
-    delta_series = [_number(row.get("dir_delta_flow")) for row in ordered]
-    valid_delta = [value for value in delta_series if value is not None]
-    final_sign = 1 if (final_delta or 0) > 0 else -1 if (final_delta or 0) < 0 else 0
-    same_sign = sum(1 for value in valid_delta if (1 if value > 0 else -1 if value < 0 else 0) == final_sign)
-    quarter = ordered[max(0, int(len(ordered) * 0.75) - 1)]
-    quarter_delta = _number(quarter.get("dir_delta_flow"))
-    return {
-        "quality": "observed",
-        "row_count": len(ordered),
-        "final_timestamp": final.get("timestamp"),
-        "directional_delta_flow": final_delta,
-        "directional_vega_flow": final_vega,
-        "otm_directional_delta_flow": otm_delta,
-        "otm_delta_share": abs(otm_delta / final_delta) if otm_delta is not None and final_delta not in {None, 0.0} else None,
-        "delta_sign_persistence": same_sign / len(valid_delta) if valid_delta else None,
-        "last_quarter_delta_change": final_delta - quarter_delta if final_delta is not None and quarter_delta is not None else None,
-        "transactions": _number(final.get("transactions")),
-        "volume": _number(final.get("volume")),
-        "caveat": "Provider directional classification can include closing trades, spreads, and dealer activity.",
-    }
+def summarize_greek_flow(rows: Sequence[Mapping[str, Any]], *, cutoff_at: datetime | None = None) -> dict[str, Any]:
+    from .greek_flow import summarize
+    return summarize(rows, cutoff_at=cutoff_at)
 
 
 def summarize_volatility(
@@ -339,30 +316,30 @@ def build_enhanced_summary(
     connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:
+        selected_ids = None if snapshot_ids is None else sorted(set(snapshot_ids))
+        id_clause = "" if selected_ids is None else " AND s.id IN (" + ",".join("?" for _ in selected_ids) + ")"
         records = connection.execute("""
-            SELECT s.id, s.symbol, s.dataset, s.metadata_json, p.content_json
+            SELECT s.id, s.symbol, s.dataset, s.as_of, s.retrieved_at, s.raw_payload_hash, s.metadata_json, p.content_json
             FROM snapshots s JOIN raw_payloads p ON p.content_hash=s.raw_payload_hash
-            WHERE json_extract(s.metadata_json, '$.capture_mode')='enhanced_current'
-              AND (? IS NULL OR s.retrieved_at <= ?)
+            WHERE (json_extract(s.metadata_json, '$.capture_mode')='enhanced_current'
+              OR (? AND json_extract(s.metadata_json, '$.capture_mode')='identified_gap_recovery'))
+              AND (? IS NULL OR (julianday(s.retrieved_at) <= julianday(?) AND julianday(s.as_of) <= julianday(?)))
+        """ + id_clause + """
             ORDER BY s.id DESC
-        """, (cutoff_text, cutoff_text)).fetchall()
+        """, (selected_ids is not None, cutoff_text, cutoff_text, cutoff_text, *(selected_ids or ()))).fetchall()
+        from .normalization import EvidenceReader
         prices: dict[str, float] = {}
-        ohlc = connection.execute("""
-            SELECT s.symbol, p.content_json FROM snapshots s
-            JOIN raw_payloads p ON p.content_hash=s.raw_payload_hash
-            WHERE s.dataset='ohlc' AND (? IS NULL OR s.retrieved_at <= ?)
-            ORDER BY s.id DESC
-        """, (cutoff_text, cutoff_text)).fetchall()
-        for record in ohlc:
-            symbol = str(record["symbol"] or "")
-            if symbol in prices:
-                continue
-            bars = _rows(json.loads(record["content_json"]))
-            dated = [bar for bar in bars if bar.get("date") or bar.get("end_time")]
-            if dated:
-                close = _number(max(dated, key=lambda bar: str(bar.get("date") or bar.get("end_time"))).get("close"))
-                if close is not None:
-                    prices[symbol] = close
+        price_sources: dict[str, int] = {}
+        with EvidenceReader(path) as reader:
+            for symbol in sorted({str(row['symbol']) for row in records}):
+                bars = reader.normalize_bars(symbol, cutoff_at=cutoff_at or datetime.now(UTC))
+                if bars:
+                    prices[symbol] = bars[-1].close
+                    price_sources[symbol] = bars[-1].source_snapshot_id
+        price_descriptors = []
+        if price_sources:
+            ids = sorted(set(price_sources.values()))
+            price_descriptors = connection.execute('SELECT id,symbol,dataset,as_of,retrieved_at,raw_payload_hash FROM snapshots WHERE id IN (' + ','.join('?' for _ in ids) + ')', ids).fetchall()
     finally:
         connection.close()
 
@@ -426,6 +403,7 @@ def build_enhanced_summary(
         output[symbol] = {
             "reference_price": prices.get(symbol),
             "sources": {
+                "reference_price": price_sources.get(symbol),
                 "stock_state": state_id, "option_price_levels": levels_id,
                 "greek_exposure_strike": gex_id, "greek_flow": flow_id,
                 "iv_term_structure": term_id, "volatility_stats": stats_id,
@@ -438,7 +416,7 @@ def build_enhanced_summary(
             "stock_state": summarize_stock_state(state),
             "option_price_levels": summarize_option_price_levels(levels, spot=prices.get(symbol)),
             "greek_exposure": summarize_greek_exposure(gex, spot=prices.get(symbol)),
-            "greek_flow": summarize_greek_flow(flow),
+            "greek_flow": summarize_greek_flow(flow, cutoff_at=cutoff_at),
             "volatility": summarize_volatility(term, stats, interp),
             "volatility_diagnostics": summarize_volatility_diagnostics(anomaly, character, premium),
             "dark_pool_levels": summarize_dark_pool(dark, spot=prices.get(symbol)),
@@ -446,6 +424,9 @@ def build_enhanced_summary(
         }
     return {
         "schema": "morning_edge/enhanced_summary/v1",
+        "aggregation_version": "enhanced-evidence-v2",
+        "cutoff_at": cutoff_text,
+        "source_snapshots": [{key: record[key] for key in ("id", "symbol", "dataset", "as_of", "retrieved_at", "raw_payload_hash")} for record in [*records, *price_descriptors]],
         "generated_at": datetime.now(UTC).isoformat(),
         "recommendations_enabled": False,
         "symbols": output,

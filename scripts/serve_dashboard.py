@@ -15,11 +15,20 @@ class DashboardHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args: object, directory: str, **kwargs: object) -> None:
         super().__init__(*args, directory=directory, **kwargs)
 
+    def log_message(self, format: str, *args: object) -> None:
+        try:
+            super().log_message(format, *args)
+        except (OSError, ValueError):
+            # A closed parent terminal must not turn a valid request into an empty reply.
+            pass
+
     def end_headers(self) -> None:
         path = self.path.partition("?")[0]
-        if path in {"/", "/index.html", "/assets/app.css", "/assets/app.js", "/data/latest.json", "/data/live-status.json"}:
+        if path in {"/", "/index.html", "/assets/app.css", "/assets/app.js", "/data/latest.json", "/data/live-status.json", "/data/pipeline-status.json", "/data/unattended-status.json", "/data/publications.json"}:
             self.send_header("Cache-Control", "no-store, max-age=0")
             self.send_header("Pragma", "no-cache")
+        elif path.startswith('/data/details/'):
+            self.send_header('Cache-Control', 'private, max-age=31536000, immutable')
         super().end_headers()
 
 

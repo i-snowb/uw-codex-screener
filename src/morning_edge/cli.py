@@ -576,7 +576,6 @@ def live_morning_run(
         *(item.fetched_at for item in (*report.results, *enhanced_report.results) if item.fetched_at),
     ])
     artifact = build_morning_run(database=database_path, capture_report=report, cutoff_at=cutoff)
-    destination = write_morning_run(output_path, artifact)
     enhanced_path = output_path.with_name(f"{output_path.stem}-enhanced.json")
     enhanced_ids = (
         [item.snapshot_id for item in enhanced_report.results if item.snapshot_id is not None]
@@ -585,7 +584,10 @@ def live_morning_run(
     enhanced_artifact = build_enhanced_summary(database_path, snapshot_ids=enhanced_ids, cutoff_at=cutoff)
     enhanced_artifact["cutoff_at"] = artifact["cutoff_at"]
     enhanced_artifact["capture_report"] = enhanced_report.to_dict() if enhanced_report is not None else None
+    from .evidence_join import attach_enhanced
+    artifact = attach_enhanced(artifact, enhanced_artifact)
     enhanced_destination = write_morning_run(enhanced_path, enhanced_artifact)
+    destination = write_morning_run(output_path, artifact)
     rendered = _render_morning_dashboard(destination, dashboard_path) if dashboard_path else None
     return {
         "status": "morning_run_complete",

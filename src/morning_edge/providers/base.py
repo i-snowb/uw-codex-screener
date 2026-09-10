@@ -32,6 +32,10 @@ class ProviderError(RuntimeError):
 class ProviderAuthenticationError(ProviderError):
     """Authentication failed.  The token is intentionally not included."""
 
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
 
 class ProviderRateLimitError(ProviderError):
     """The provider rejected the request due to a rate limit."""
@@ -444,7 +448,10 @@ class SafeGetClient:
             self._capture(raw)
 
             if status == 401 or status == 403:
-                raise ProviderAuthenticationError("provider rejected the supplied credentials")
+                raise ProviderAuthenticationError(
+                    f"provider denied access (HTTP {status}); credential or endpoint permission requires review",
+                    status_code=status,
+                )
             if status in self.RETRYABLE_STATUSES and attempt < self.max_attempts:
                 self._sleep(self._backoff(attempt, metadata.retry_after_seconds))
                 continue

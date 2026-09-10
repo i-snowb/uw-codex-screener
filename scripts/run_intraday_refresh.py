@@ -243,6 +243,8 @@ def run_cycle(args: argparse.Namespace, now: datetime) -> dict[str, Any]:
                 max_transport_attempts_per_item=args.max_attempts,
                 generated_at=now,
             )
+            if _failures(current_report, None):
+                raise RuntimeError('base capture failed; enhanced capture skipped')
             enhanced_report = collect_enhanced(
                 client=client,
                 snapshots=snapshots,
@@ -257,6 +259,9 @@ def run_cycle(args: argparse.Namespace, now: datetime) -> dict[str, Any]:
     failures = _failures(current_report, enhanced_report)
     if failures:
         raise RuntimeError("capture failed closed: " + ", ".join(failures[:12]))
+
+    now = max([now, *(datetime.fromisoformat(item.fetched_at.replace('Z', '+00:00')).astimezone(ET)
+        for report in (current_report, enhanced_report) for item in report.results if item.fetched_at)])
 
     day_start = datetime.combine(now.date(), time(4), ET)
     full_report = reconstruct_current_report(

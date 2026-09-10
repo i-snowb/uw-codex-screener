@@ -71,7 +71,7 @@ chmod 600 .env
 - The mutable current run is `outputs/intraday/YYYY-MM-DD/latest-run.json`.
 - `outputs/intraday/cycles.jsonl` records each published cycle, its source
   snapshot IDs, request use, and publication digest.
-- `dashboard-app/data/latest.json` is replaced atomically. The browser polls it
+- `dashboard-app/data/latest.json` is replaced atomically. The browser polls its small status manifest
   every 30 seconds and rerenders only when `dataVersion` changes.
 - Dated daily JSON, portable HTML, and frozen archives are not changed.
 

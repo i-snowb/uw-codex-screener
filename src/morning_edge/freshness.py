@@ -55,29 +55,31 @@ def dataset_freshness(
         observed = _parse_date(raw_date)
         if observed is None:
             status, lag = "UNAVAILABLE", None
+        elif observed > cutoff.date() or not is_nyse_session(observed):
+            status, lag = "INVALID_SESSION", None
         elif observed > complete:
             status, lag = "INTRADAY_PARTIAL", None
         else:
             lag = _session_lag(complete, observed)
-            status = "CURRENT_COMPLETE" if lag == 0 else "PRIOR_SESSION" if lag == 1 else "STALE"
+            status = "LATEST_EXPECTED_SESSION" if lag == 0 else "PRIOR_SESSION" if lag == 1 else "STALE"
         datasets[str(name)] = {
             "status": status,
             "observed_session": observed.isoformat() if observed else None,
             "session_lag": lag,
         }
     statuses = {item["status"] for item in datasets.values()}
-    if "STALE" in statuses or "UNAVAILABLE" in statuses:
+    if statuses & {"STALE", "UNAVAILABLE", "INVALID_SESSION"}:
         overall = "DEGRADED"
     elif "PRIOR_SESSION" in statuses:
         overall = "MIXED_SESSION"
     elif "INTRADAY_PARTIAL" in statuses:
         overall = "INTRADAY_PARTIAL"
     else:
-        overall = "CURRENT_COMPLETE"
+        overall = "LATEST_EXPECTED_SESSION"
     return {
         "overall": overall,
         "cutoff_et": cutoff.isoformat(),
         "latest_complete_session": complete.isoformat(),
         "datasets": datasets,
-        "meaning": "Dates are compared with the latest regular session that could be complete at the scoring cutoff.",
+        "meaning": "Session-date freshness only. This does not establish complete pagination, usable fields, or execution eligibility.",
     }

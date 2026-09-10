@@ -20,6 +20,16 @@ Polling reads the small `data/live-status.json` manifest first. It downloads
 applying the payload. Replay pauses polling until the user selects Live. An
 in-flight refresh cannot replace a newly selected replay.
 
+The collector also writes `data/pipeline-status.json`. This describes the latest
+attempt, independently of the last successful publication. A failed capture
+does not replace `latest.json`.
+
+The latest payload contains compact watchlist entries. Price histories and
+option detail load only for selected tickers from content-hashed files under
+`data/details/`. The browser verifies each digest before displaying detail.
+`--local-only` still writes immutable dated JSON and a replay manifest; a
+portable HTML export is not required. Use `--require-ready` for daily release.
+
 Base and enhanced captures must share a completed-capture cutoff. The renderer
 rejects an enhanced sidecar whose retrieval times exceed the run cutoff.
 
@@ -75,6 +85,32 @@ During an open session, the separate intraday runner can update
 `dashboard-app/data/latest.json` atomically. The browser checks for a new data
 version every 30 seconds. Daily publications and portable archives remain
 unchanged. See [intraday refresh](intraday-refresh.md).
+
+## Reading the decision view
+
+Decision view hides detailed model results, ticker outcome records, and research
+disclosures. Research detail restores them. Execution gates remain visible in both
+modes. The primary summary separates the stored agent interpretation, observed
+price trend, and active V3 centers at 1, 5, and 20 sessions. V4 stays in shadow.
+
+The history-depth score describes stored evidence depth, not confidence or current
+window completeness. Option flow enters the unweighted context alignment count
+only when its window is complete, comparison status is comparable, and quality is
+positive. Otherwise it is provisional. The flow chart reports complete historical
+rows separately from sessions comparable to the current window; partial bars are
+faded.
+
+Daily publication commands and the unattended runner attach the latest publication
+from an earlier New York trading date when no explicit previous input is supplied.
+The resolver verifies the archived JSON digest and confines references to the
+dashboard data directory. Same-day revisions, weekends, holidays, and future
+publications are not automatic prior-session candidates. The score comparison
+shows its prior cutoff and requires matching known feature and active-model
+versions. Missing history or incompatible versions produce an unavailable state,
+not a zero change.
+
+After rebuilding frontend assets, reload the page to load the new application
+code. Automatic polling refreshes data but does not replace the running code.
 
 ## What another user gets from GitHub
 

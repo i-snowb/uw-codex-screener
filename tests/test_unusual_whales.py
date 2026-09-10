@@ -383,7 +383,7 @@ class UnusualWhalesAdapterTests(unittest.TestCase):
             ["qcom", "qqq", "qcom"], interval="1d",
             start_date="2026-07-24", end_date=market_date,
         )
-        client.economic_calendar(as_of="2026-08-25")
+        client.economic_calendar()
 
         parsed = [urlparse(url) for url in transport.requests]
         paths = [item.path for item in parsed]
@@ -406,7 +406,7 @@ class UnusualWhalesAdapterTests(unittest.TestCase):
         self.assertEqual(["1d"], correlation_query["interval"])
         self.assertEqual(["2026-07-24"], correlation_query["start_date"])
         self.assertEqual([market_date], correlation_query["end_date"])
-        self.assertEqual(["2026-08-25"], parse_qs(parsed[9].query)["date"])
+        self.assertEqual({}, parse_qs(parsed[9].query))
 
     def test_live_chain_and_ohlc_aliases_are_accepted_without_changing_time_precision(self) -> None:
         client = UnusualWhalesClient("test-key", transport=LiveAliasTransport())

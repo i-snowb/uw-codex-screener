@@ -1,0 +1,10 @@
+"""Shared live/replay rendering from the publication's own evaluation snapshot."""
+PRICE_TRIAL_JS = r'''
+function priceTrialMarkup(rows){
+  const value=v=>n(v)?v.toFixed(3):'—',accuracy=v=>n(v)?(v*100).toFixed(1)+'%':'—';
+  const body=Array.isArray(rows)&&rows.length?`<div class="me-table-wrap"><table><thead><tr><th>Horizon / model pair</th><th>Matched / dates</th><th>Pending / excluded</th><th>Return error: trial / active / zero</th><th>Direction: trial / active / up / momentum</th><th>State</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.horizon)}D<br><small>${esc(r.trial_version)} vs ${esc(r.active_version)}</small></td><td>${esc(r.matched)} / ${esc(r.origin_dates)}</td><td>${esc(r.pending)} / ${esc(r.excluded)}</td><td>${value(r.trial_mae)} / ${value(r.active_mae)} / ${value(r.zero_mae)}</td><td>${accuracy(r.trial_accuracy)} / ${accuracy(r.active_accuracy)} / ${accuracy(r.always_up_accuracy)} / ${accuracy(r.momentum_accuracy)}</td><td>${esc(r.status)}</td></tr>`).join('')}</tbody></table></div>`:'<p>Awaiting prospective trial records. Earlier publications are not backfilled.</p>';
+  return `<details open id="me-price-trial"><summary>Fixed price-only trial · head-to-head</summary><div class="me-detail-body">${body}<p class="me-table-note">Shadow only: fixed trend/volatility coefficients and scalers; no daily retraining. Same stock, origin close, cutoff, horizon, target date, and realized return are required for each pair. Each origin date has equal weight. Return error is mean absolute error in percentage points of return; lower is better. Zero is the no-change return baseline; up is always-up direction; momentum uses the stored 20-session trend. Exact-zero outcomes use a neutral class. At least 60 matched origin dates per horizon trigger review, not promotion. Overlapping horizons remain dependent. No calibrated probabilities or executable-return claim.</p></div></details>`;
+}
+const originalPlatformDetails=renderPlatformDetails;
+renderPlatformDetails=()=>{originalPlatformDetails();byId('me-platform-details').insertAdjacentHTML('afterbegin',priceTrialMarkup(DATA.evaluation.priceTrial));};
+'''

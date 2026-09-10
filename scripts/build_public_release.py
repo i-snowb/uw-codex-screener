@@ -26,6 +26,7 @@ PUBLIC_TREE_SUFFIXES = {
     "src": frozenset({".py"}),
     "scripts": frozenset({".py", ".sh"}),
     "tests": frozenset({".py"}),
+    "prompts": frozenset({".md"}),
     ".github": frozenset({".yml", ".yaml"}),
 }
 EXCLUDED_PUBLIC_SCRIPTS = frozenset({"build_historical_evidence_visualization.py"})
@@ -44,6 +45,7 @@ PUBLIC_DOCS = (
     "risk-policy-template.md",
     "sunday-trial-runbook.md",
     "unusual-whales-endpoint-audit.md",
+    "unattended-runner.md",
 )
 PUBLIC_DASHBOARD_FILES = (
     "dashboard-app/index.html",

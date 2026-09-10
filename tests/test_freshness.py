@@ -24,9 +24,9 @@ class FreshnessTests(unittest.TestCase):
                 "missing": None,
             },
         )
-        self.assertEqual("CURRENT_COMPLETE", result["datasets"]["price"]["status"])
+        self.assertEqual("LATEST_EXPECTED_SESSION", result["datasets"]["price"]["status"])
         self.assertEqual("INTRADAY_PARTIAL", result["datasets"]["flow"]["status"])
-        self.assertEqual("CURRENT_COMPLETE", result["datasets"]["oi"]["status"])
+        self.assertEqual("LATEST_EXPECTED_SESSION", result["datasets"]["oi"]["status"])
         self.assertEqual("STALE", result["datasets"]["old"]["status"])
         self.assertEqual("UNAVAILABLE", result["datasets"]["missing"]["status"])
         self.assertEqual("DEGRADED", result["overall"])

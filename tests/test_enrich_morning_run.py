@@ -53,6 +53,15 @@ def record() -> dict:
 
 
 class EnrichmentTests(unittest.TestCase):
+    def test_rejects_valid_but_unrelated_field_source(self) -> None:
+        run = source()
+        run['watchlist'][0]['field_source_snapshot_ids'] = {'technical': [10], 'evidence.news': [11]}
+        bad = record()
+        bad['evidence_points'][0]['field_refs'] = ['technical.ema20']
+        bad['evidence_points'][0]['source_snapshot_ids'] = [11]
+        with self.assertRaisesRegex(ValueError, 'no source for field'):
+            module.enrich(run, [{'schema': module.ENRICHMENT_SCHEMA, 'records': [bad]}], input_digest='a' * 64)
+
     def test_validates_and_ranks_without_enabling_recommendations(self) -> None:
         result = module.enrich(source(), [{"schema": module.ENRICHMENT_SCHEMA, "records": [record()]}], input_digest="a" * 64)
         item = result["watchlist"][0]

@@ -235,6 +235,38 @@ class UnusualWhalesClient:
             raise ValueError(f"{API_KEY_ENVIRONMENT_VARIABLE} is not set")
         return cls(token, **kwargs)
 
+    def stock_info(self, ticker: str) -> EndpointResponse:
+        """Current company identity and next earnings date; never historical earnings."""
+        symbol = _ticker(ticker)
+        endpoint = f'/api/stock/{symbol}/info'
+        response = self._http.get_json(endpoint)
+        data = response.data
+        if not isinstance(data, Mapping) or data.get('symbol') != symbol or not data.get('full_name'):
+            raise ProviderSchemaError('stock info requires matching symbol and company name')
+        if data.get('next_earnings_date') is not None:
+            _require_iso_date(data['next_earnings_date'], endpoint=endpoint, field='next_earnings_date', index=0)
+        return EndpointResponse(endpoint, response)
+
+    def company_reference(self, ticker: str, *, kind: str) -> EndpointResponse:
+        """Capture documented corporate-action arrays without inferring adjustments."""
+        if kind not in {'splits', 'dividends'}:
+            raise ValueError('company reference kind must be splits or dividends')
+        symbol = _ticker(ticker)
+        endpoint = f'/api/companies/{symbol}/{kind}'
+        response = self._http.get_json(endpoint)
+        data = response.data
+        if not isinstance(data, Mapping) or data.get('ticker') != symbol or not isinstance(data.get(kind), list) or any(not isinstance(row, Mapping) for row in data[kind]):
+            raise ProviderSchemaError('company reference requires matching ticker and an object array')
+        return EndpointResponse(endpoint, response)
+
+    def security_listings(self) -> EndpointResponse:
+        endpoint = '/api/companies/listings'
+        response = self._http.get_json(endpoint, params={'status': 'active'})
+        data = response.data
+        if not isinstance(data, Mapping) or data.get('status') != 'active' or not isinstance(data.get('listings'), list) or any(not isinstance(row, Mapping) for row in data['listings']):
+            raise ProviderSchemaError('active listings requires a status and object array')
+        return EndpointResponse(endpoint, response)
+
     def option_chain(self, ticker: str, *, as_of: date | str | None = None, greeks: bool = True) -> EndpointResponse:
         """Get contract rows enriched with NBBO, IV, OI, volume, and Greeks.
 
@@ -576,10 +608,12 @@ class UnusualWhalesClient:
         return EndpointResponse(endpoint, response)
 
     def economic_calendar(self, *, as_of: date | str | None = None) -> EndpointResponse:
-        """Get scheduled macroeconomic events for one market date."""
+        """Get the provider's calendar window; date filtering is not documented."""
 
+        if as_of is not None:
+            raise ValueError('economic calendar does not support an audited historical date parameter')
         endpoint = "/api/market/economic-calendar"
-        response = self._http.get_json(endpoint, params={"date": _market_date(as_of)})
+        response = self._http.get_json(endpoint)
         _require_object_collection(response, endpoint=endpoint)
         return EndpointResponse(endpoint, response)
 

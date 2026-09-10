@@ -396,6 +396,7 @@ class EvidenceReader:
         # evidence until an external checkpoint occurs.
         self._connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         self._connection.row_factory = sqlite3.Row
+        self._bar_cache: dict[tuple[str, datetime, int], tuple[NormalizedBar, ...]] = {}
 
     def close(self) -> None:
         self._connection.close()
@@ -443,6 +444,13 @@ class EvidenceReader:
         return [chosen[key] for key in sorted(chosen)]
 
     def normalize_bars(self, ticker: str, *, cutoff_at: datetime) -> tuple[NormalizedBar, ...]:
+        version = self._connection.execute('PRAGMA data_version').fetchone()[0]
+        key = (ticker, cutoff_at, version)
+        if key not in self._bar_cache:
+            self._bar_cache[key] = self._normalize_bars(ticker, cutoff_at=cutoff_at)
+        return self._bar_cache[key]
+
+    def _normalize_bars(self, ticker: str, *, cutoff_at: datetime) -> tuple[NormalizedBar, ...]:
         """Merge cutoff-safe rolling OHLC windows; newest source wins per date."""
 
         snapshots = self._snapshots(ticker, "ohlc", cutoff_at)

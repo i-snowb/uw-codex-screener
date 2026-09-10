@@ -234,7 +234,9 @@ def intraday_condition(
     else:
         neutral.append("Price-to-EMA20 confirmation is unavailable.")
 
-    if flow_delta is not None and direction_sign and persistence is not None and persistence >= 0.55:
+    if flow.get("confirmation_eligible") is not True or flow.get('session_date') != observed.date().isoformat():
+        neutral.append("Greek-flow coverage or aggregation is not eligible for confirmation.")
+    elif flow_delta is not None and direction_sign and persistence is not None and persistence >= 0.55:
         flow_sign = 1 if flow_delta > 0 else -1 if flow_delta < 0 else 0
         if flow_sign:
             aligned = flow_sign == direction_sign
