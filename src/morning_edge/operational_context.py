@@ -138,7 +138,13 @@ def attach_operational_context(run, *, snapshots, company_results, calendar=None
             stored = chain_sources[0]
             rows = stored.envelope.payload['data']
             checks['chain_identity'][ticker] = chain_identity_diagnostic(rows, ticker) | {'source_snapshot_id': stored.id}
-            expected = entry.get('trade_thesis', {}).get('option_reference', {}).get('contract')
+            reference = (entry.get('trade_thesis') or {}).get('option_reference')
+            expected = reference.get('contract') if isinstance(reference, dict) else None
+            if not expected:
+                checks['reference_quote_checks'][ticker] = {'status': 'BLOCKED',
+                    'errors': ['no_selected_option_reference'], 'execution_ready': False,
+                    'source_snapshot_id': stored.id}
+                continue
             selected = next((row for row in rows if row.get('option_symbol') == expected), {})
             quote = dict(selected, bid=selected.get('nbbo_bid', selected.get('bid')), ask=selected.get('nbbo_ask', selected.get('ask')),
                 quote_timestamp=selected.get('quote_time') or selected.get('nbbo_timestamp'),

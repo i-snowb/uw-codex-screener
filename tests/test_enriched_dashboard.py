@@ -1,8 +1,11 @@
 import importlib.util
+import json
 from datetime import date, timedelta
 from pathlib import Path
 import re
 import stat
+import shutil
+import subprocess
 import tempfile
 import unittest
 
@@ -39,6 +42,58 @@ def sample() -> dict:
 
 
 class EnrichedDashboardTests(unittest.TestCase):
+    def test_after_close_refresh_retains_forecast_and_analysis_origin(self) -> None:
+        run = sample()
+        run['intraday_status'] = {
+            'mode': 'AFTER_CLOSE_CONTEXT_REFRESH',
+            'baseline_cutoff_at': '2026-08-21T12:00:00Z',
+            'baseline_run_id': 'morning-original',
+        }
+        row = run['watchlist'][0]
+        row['forecast_origin'] = {
+            'session': '2026-08-20', 'price': 100, 'move30': .12,
+            'cutoff_at': '2026-08-21T12:00:00Z', 'run_id': 'morning-original',
+        }
+        normalized = dashboard.normalize_run(run)
+        entry = normalized['entries'][0]
+        self.assertEqual(160.75, entry['price'])
+        self.assertEqual('2026-08-21', entry['bars'][-1]['d'])
+        self.assertEqual(100, entry['forecastOrigin']['price'])
+        self.assertEqual('2026-08-20', entry['forecastOrigin']['session'])
+        self.assertEqual('morning-original', normalized['refresh']['baselineRunId'])
+        script = inline_script(dashboard.build_fragment(run))
+        self.assertIn('AFTER-CLOSE DATA REFRESH', script)
+        self.assertIn('no new agent prediction', script)
+        self.assertIn('rows=forecastOriginRows(e,currentRows())', script)
+        self.assertIn('origin=forecastReferencePrice(e)', script)
+        self.assertIn('spot=forecastReferencePrice(e)', script)
+        self.assertIn("esc(observedDate)+' close'", script)
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('Node.js is required for forecast-origin behavior checks')
+        functions = '\n'.join(
+            line for line in script.splitlines()
+            if line.startswith(('function forecastOriginRows(', 'function forecastReferencePrice(', 'function forecastRead('))
+        )
+        check = """
+const assert=require('node:assert/strict'), n=Number.isFinite;
+const signedPct=String,pct=String;
+const e=ENTRY;
+assert.equal(forecastReferencePrice(e), 100);
+assert.deepEqual(forecastOriginRows(e,e.bars).map(row=>row.d), ['2026-08-20']);
+assert.equal(e.bars.at(-1).d, '2026-08-21');
+assert.equal(forecastReferencePrice({price:160.75}),160.75);
+assert.equal(forecastOriginRows({},e.bars),e.bars);
+assert.equal(forecastOriginRows({forecastOrigin:{session:'2020-01-01'}},e.bars).length,0);
+e.edge.forecastV4.path=Array.from({length:20},()=>({center:110,p10:90,p90:130}));
+const read=forecastRead(e);
+assert.ok(Math.abs(read.center-10)<1e-10);
+assert.equal(read.spread,40);
+assert.equal(read.move,12);
+assert.ok(read.read.includes('Frozen origin 2026-08-20'));
+""".replace('ENTRY', json.dumps(entry))
+        subprocess.run([node, '-e', functions + check], check=True, capture_output=True, text=True)
+
     def test_two_year_price_history_and_ohlcv_are_preserved(self) -> None:
         start = date(2024, 1, 1)
         bars = [
@@ -140,7 +195,7 @@ class EnrichedDashboardTests(unittest.TestCase):
         self.assertIn("Model accountability", script)
         self.assertIn("frozen forecasts", script)
         self.assertIn("prospective resolved", script)
-        self.assertIn("Evidence alignment", script)
+        self.assertIn("Context alignment", script)
         self.assertIn("evidence quality", script)
         self.assertIn("GEX same-method", script)
         self.assertIn("Opportunity map", fragment)

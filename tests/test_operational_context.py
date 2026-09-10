@@ -163,6 +163,19 @@ class OperationalContextTests(unittest.TestCase):
             self.assertTrue(result[0]['collection_stopped'])
             self.assertEqual('SKIPPED_AFTER_COLLECTION_FAILURE', result[1]['status'])
 
+    def test_absent_option_reference_remains_blocked_without_aborting_research(self):
+        with tempfile.TemporaryDirectory() as temp, SnapshotStore(Path(temp) / 'snapshots.sqlite') as snapshots:
+            chain = snapshots.insert(SnapshotEnvelope(provider='test', dataset=Dataset.OPTION_CHAIN,
+                symbol='QCOM', as_of=NOW, retrieved_at=NOW, payload={'data': [CONTRACT]}))
+            for reference in (None, {}, 'invalid'):
+                run = {'cutoff_at': timestamp_text(NOW), 'watchlist': [{'ticker': 'QCOM',
+                    'provenance': {'snapshot_ids': [chain.id]}, 'trade_thesis': {'option_reference': reference}}]}
+                joined = attach_operational_context(run, snapshots=snapshots, company_results=[])
+                check = joined['operational_context']['diagnostics']['reference_quote_checks']['QCOM']
+                self.assertEqual(['no_selected_option_reference'], check['errors'])
+                self.assertFalse(check['execution_ready'])
+                self.assertFalse(joined['operational_context']['recommendations_enabled'])
+
 
 if __name__ == '__main__':
     unittest.main()

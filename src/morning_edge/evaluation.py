@@ -394,6 +394,11 @@ def register_run(
                     "SHADOW_V4", forecast_v4,
                     _text(forecast_v4.get("direction"), "NEUTRAL").upper(), None,
                 ))
+            price_trial = _mapping(edge.get("price_only_trial"))
+            if price_trial.get("status") == "SHADOW_UNCALIBRATED" and _path_targets(price_trial):
+                if cutoff_at < timestamp_from_text(_text(price_trial.get("starts_at"))):
+                    raise ValueError("price trial cannot be backfilled before its activation")
+                variants.append(("SHADOW_PRICE_TRIAL", price_trial, "NEUTRAL", None))
             for raw_challenger in _sequence(challenger_suite.get("models")):
                 challenger = _mapping(raw_challenger)
                 if _path_targets(challenger):
@@ -491,6 +496,8 @@ def register_run(
                             "published_target_date": _text(target.get("date"))[:10],
                             "daily_action": _text(entry.get("action"), "NO_RECOMMENDATION"),
                             "forecast_status": _text(model.get("status"), "UNAVAILABLE"),
+                            "trial_id": model.get("trial_id"),
+                            "trial_features": model.get("features") if model_role == "SHADOW_PRICE_TRIAL" else None,
                             "observed_analog_frequency_is_probability": False,
                             "baseline_directions": baseline_directions,
                             "regime_labels": {"trend": trend_regime, "volatility": volatility_regime},
@@ -696,6 +703,7 @@ def build_report(database: str | Path) -> dict[str, Any]:
                 "run_id": metadata.get("run_id"),
                 "published_at": timestamp_text(stored.record.cutoff_at),
                 "origin_session": metadata.get("origin_session"),
+                "origin_close": metadata.get("origin_close"),
                 "horizon_sessions": stored.record.horizon_sessions,
                 "direction": metadata.get("direction_label"),
                 "direction_semantics": metadata.get("direction_semantics", "legacy-terminal-direction"),
@@ -893,6 +901,7 @@ def build_report(database: str | Path) -> dict[str, Any]:
     prospective_evaluated = sum(
         row["status"] == "EVALUATED" and row["registration_mode"] == "PROSPECTIVE" for row in rows
     )
+    from .price_trial import paired_trial_report
     return {
         "evaluation_version": EVALUATION_VERSION,
         "active_model_version": active_model,
@@ -917,6 +926,7 @@ def build_report(database: str | Path) -> dict[str, Any]:
         "ticker_breakdown": ticker_breakdown,
         "conviction_breakdown": conviction_breakdown,
         "model_breakdown": model_breakdown,
+        "price_trial_comparison": paired_trial_report(model_rows),
         "regime_breakdown": regime_breakdown,
         "minimum_gates": {
             "evaluations_per_horizon": MINIMUM_EVALUATIONS_PER_HORIZON,

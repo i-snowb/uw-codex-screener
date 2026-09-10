@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 
 import build_enriched_morning_dashboard as dashboard
 from private_artifacts import write_private_bytes
+from signal_research_panel import SIGNAL_RESEARCH_JS
 
 
 SCHEMA_VERSION = "codex-screener-bundle-v1"
@@ -59,6 +60,59 @@ def _publication_date(value: object) -> str:
     return cutoff.astimezone(ZoneInfo('America/New_York')).date().isoformat()
 
 
+def attach_previous_publication(run: Mapping[str, Any], app_root: Path) -> dict[str, Any]:
+    """Attach the latest earlier session from hash-verified local publications."""
+    from datetime import date
+    from morning_edge.clock import is_nyse_session
+
+    result = dict(run)
+    if run.get("previous_run"):
+        return result
+    cutoff = run.get("cutoff_at", run.get("as_of", run.get("asOf")))
+    if not cutoff:
+        return result
+    current_date = _publication_date(cutoff)
+    data_root = (app_root / "data").resolve()
+    candidates = []
+    for path in sorted(data_root.rglob("manifest.json")):
+        manifest = _read_object(path, "publication manifest")
+        session = manifest.get("run_date", "")
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", session) and session < current_date and is_nyse_session(date.fromisoformat(session)):
+            candidates.append((session, path, manifest))
+    if not candidates:
+        return result
+    prior_date = max(item[0] for item in candidates)
+    verified = []
+    for session, manifest_path, manifest in candidates:
+        if session != prior_date:
+            continue
+        reference = manifest["files"]["daily_data"]
+        path = Path(reference["path"]).resolve()
+        if not path.is_relative_to(data_root):
+            raise ValueError("previous publication must be inside dashboard data")
+        body = path.read_bytes()
+        if _digest(body) != reference["sha256"]:
+            raise ValueError("previous publication integrity check failed")
+        prior = json.loads(body)
+        if _publication_date(prior.get("asOf")) != session:
+            raise ValueError("previous publication cutoff does not match its manifest")
+        if prior.get("entries"):
+            verified.append((datetime.fromisoformat(prior["asOf"].replace("Z", "+00:00")), str(manifest_path), prior, reference["sha256"]))
+    if not verified:
+        return result
+    _, _, prior, digest = max(verified, key=lambda item: item[:2])
+    result["previous_run"] = {
+        "asOf": prior["asOf"], "dataVersion": prior.get("dataVersion"), "sha256": digest,
+        "entries": [{"ticker": row["ticker"], "rank": row["rank"], "price": row["price"],
+                     "thesis": {key: row["thesis"][key] for key in ("direction", "conviction")},
+                     "edge": {"version": row["edge"].get("version"),
+                              "forecast": {"version": row["edge"].get("forecast", {}).get("version")},
+                              "dimensions": row["edge"]["dimensions"]}}
+                    for row in prior["entries"]],
+    }
+    return result
+
+
 def _split_fragment(fragment: str) -> tuple[str, str, str]:
     styles = re.findall(r"<style>(.*?)</style>", fragment, flags=re.DOTALL | re.IGNORECASE)
     scripts = re.findall(r"<script>(.*?)</script>", fragment, flags=re.DOTALL | re.IGNORECASE)
@@ -90,6 +144,7 @@ let DATA=JSON.parse(initialBody);
 let replayActive=false,replaySelection='',navigationEpoch=0,appliedDigest=initialDigest;
 let refreshFailures=0,refreshInFlight=false;
 let pipelineStatus=null;
+let unattendedStatus=null;
 const detailLoads=new Map();
 async function loadDetail(entry){
   if(!entry?.detail||entry.detailLoaded)return;
@@ -108,6 +163,10 @@ await loadDetail(DATA.entries?.[0]);
 try{
   const r=await fetch('./data/pipeline-status.json',{cache:'no-store'});
   if(r.ok)pipelineStatus=await r.json();
+}catch{}
+try{
+  const r=await fetch('./data/unattended-status.json',{cache:'no-store'});
+  if(r.ok)unattendedStatus=await r.json();
 }catch{}
 try{
   const catalogResponse=await fetch('./data/publications.json',{cache:'no-store'});
@@ -170,7 +229,8 @@ function renderAvailability(){
   status.hidden=false;
   if(replayActive){status.textContent=`REPLAY — frozen publication as of ${DATA.asOf}. Automatic refresh is paused until you select Live.`;return}
   if(refreshFailures){status.textContent=`REFRESH FAILED (${refreshFailures}) — showing the last stored publication as of ${DATA.asOf}. No new data is confirmed.`;return}
-  if(pipelineStatus&&pipelineStatus.status!=='PUBLISHED'){status.textContent=`PIPELINE ${pipelineStatus.status} · ${pipelineStatus.stage||'unknown stage'} · ${pipelineStatus.reason||''} · latest publication remains ${DATA.asOf}.`;return}
+  if(unattendedStatus&&!['COMPLETE','WAITING_FOR_START','MARKET_CLOSED'].includes(unattendedStatus.status)){status.textContent=`UNATTENDED ${unattendedStatus.status} · ${unattendedStatus.stage||'unknown stage'} · ${unattendedStatus.reason||''} · checked ${unattendedStatus.updated_at||'unknown'} · publication ${DATA.asOf}.`;return}
+  if(pipelineStatus&&!['PUBLISHED','COMPLETE'].includes(pipelineStatus.status)){status.textContent=`PIPELINE ${pipelineStatus.status} · ${pipelineStatus.stage||'unknown stage'} · ${pipelineStatus.reason||''} · latest publication remains ${DATA.asOf}.`;return}
   if(!Number.isFinite(age)||age>6){status.textContent=`${DATA.mode==='RETROSPECTIVE_REPROCESSING'?'RETROSPECTIVE RECALCULATION · ':''}STALE STORED DATA — as of ${DATA.asOf||'unknown'}${Number.isFinite(age)?` (${age.toFixed(1)} hours old)`:''}. This is not a live market quote.`;return}
   status.textContent=`Latest stored publication as of ${DATA.asOf}. Research only; not a live market quote.`;
 }
@@ -188,6 +248,8 @@ async function refreshLatest(){
   const epoch=navigationEpoch;
   try{
   const pipelineResponse=await fetch('./data/pipeline-status.json',{cache:'no-store'});
+  const unattendedResponse=await fetch('./data/unattended-status.json',{cache:'no-store'});
+  if(unattendedResponse.ok)unattendedStatus=await unattendedResponse.json();
   if(pipelineResponse.ok)pipelineStatus=await pipelineResponse.json();
   const manifestResponse=await fetch('./data/live-status.json',{cache:'no-store'});
   if(!manifestResponse.ok)throw new Error(`Publication status failed (${manifestResponse.status})`);
@@ -217,7 +279,7 @@ setInterval(()=>refreshLatest().catch(showRefreshError),pollSeconds*1000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshLatest().catch(showRefreshError)});
 renderAvailability();
 """
-    external = external[:end] + live_refresh + external[end:]
+    external = external[:end] + SIGNAL_RESEARCH_JS + live_refresh + external[end:]
     end = external.rfind(ending)
     failure = """})().catch(error=>{
 const status=document.getElementById('app-status');
@@ -465,6 +527,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     ):
         if argument is not None:
             run[key] = _read_object(argument, label)
+    run = attach_previous_publication(run, args.app_root)
     if args.shell_only:
         manifest = {"shell_only": True, "files": build_shell(run=run, app_root=args.app_root)}
     elif args.local_only:

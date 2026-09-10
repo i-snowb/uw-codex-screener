@@ -212,6 +212,9 @@ def enrich(run: Mapping[str, Any], batches: Sequence[Mapping[str, Any]], *, inpu
     result["agentic_analysis"] = {
         "schema": ENRICHMENT_SCHEMA,
         "backend": "interactive_codex_analysis",
+        "requested_model": None,
+        "runtime_reported_model": None,
+        "model_identity_status": "UNKNOWN_NOT_RECORDED",
         "critic": "deterministic-contract-validator-v1",
         "input_sha256": input_digest,
         "validated_at": datetime.now(UTC).isoformat(),

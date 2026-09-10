@@ -1424,7 +1424,7 @@ class EdgeAnalyzer:
         forecast_v4 = self.forecast_distribution_v4(
             technical=technical, analogs=analogs, surface=surface,
         )
-        challengers = shadow_challengers(bars=bars)
+        challengers = shadow_challengers(bars=bars, cutoff_at=cutoff_at)
         dimensions = self.edge_dimensions(
             technical=technical, surface=surface, flow=flow, gex=gex,
             earnings=earnings, news=news, analogs=analogs,

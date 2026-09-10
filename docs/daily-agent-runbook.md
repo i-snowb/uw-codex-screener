@@ -19,6 +19,13 @@ Successful base and enhanced captures use one shared end-of-capture cutoff.
   requirement plus the protected reserve.
 - Use the current ET date for the run directory.
 - Do not reuse an analyst batch from a different run or date.
+- Run the network-free plan before collection. The approved 334-request plan
+  includes 14 company-context calls and at most 1,002 transport attempts per
+  capture. The saved schedule must use the same bound; it must not silently
+  widen when datasets are added.
+- Check today's `outputs/unattended/YYYY-MM-DD/state.json` before a chat-driven
+  run. Do not start a second collector while a headless run is active, and do
+  not repeat a completed, integrity-verified run.
 
 ## Daily sequence
 
@@ -109,8 +116,10 @@ Successful base and enhanced captures use one shared end-of-capture cutoff.
    - output files are owner-private.
 10. Verify HTTP 200 from `http://127.0.0.1:8765/`. Start
     `python3 scripts/serve_dashboard.py --host 127.0.0.1 --port 8765` if needed.
-    Open the verified URL in Chrome. Keep the Mac powered on and Codex running
-    for local scheduled execution. Post a compact same-chat update with the run timestamp, actual evidence
+    Open the verified URL in Chrome. Chat-based scheduling requires Codex to run.
+    After the validated LaunchAgents are installed, they do not require Codex
+    to be open; they still require the Mac's login, power and network conditions.
+    See `unattended-runner.md`. Post a compact same-chat update with the run timestamp, actual evidence
    dates, quota use, failed or empty datasets, and links to the final JSON and
    dashboard. Never print credentials.
 

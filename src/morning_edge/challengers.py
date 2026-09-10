@@ -7,18 +7,21 @@ thesis before chronological promotion gates pass.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from math import exp, log, sqrt
 from statistics import fmean, median, pstdev
 from typing import Any, Mapping, Sequence
 
-from .clock import next_nyse_session
+from .clock import is_nyse_session, next_nyse_session
+from .freshness import latest_complete_session
 
 
-CHALLENGER_VERSION = "shadow-challenger-suite-v1"
+CHALLENGER_VERSION = "shadow-challenger-suite-v2"
 
 
 def _number(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
     try:
         result = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
@@ -35,16 +38,33 @@ def _quantile(values: Sequence[float], probability: float) -> float:
     return ordered[lower] * (1.0 - weight) + ordered[upper] * weight
 
 
-def _clean_bars(bars: Sequence[Mapping[str, Any]]) -> tuple[list[date], list[float]]:
+def _clean_bars(bars: Sequence[Mapping[str, Any]], *, cutoff_at: datetime | None = None) -> tuple[list[date], list[float]]:
     clean: list[tuple[date, float]] = []
+    complete = latest_complete_session(cutoff_at) if cutoff_at is not None else None
     for row in bars:
+        if not isinstance(row, Mapping):
+            raise ValueError("INVALID_PRICE_ROW")
         value = _number(row.get("close"))
         try:
-            session = date.fromisoformat(str(row.get("date"))[:10])
-        except ValueError:
-            continue
-        if value is not None and value > 0:
-            clean.append((session, value))
+            text = row["date"]
+            session = date.fromisoformat(text)
+            if text != session.isoformat():
+                raise ValueError("noncanonical session")
+        except (KeyError, TypeError, ValueError):
+            raise ValueError("INVALID_SESSION_DATE") from None
+        if not is_nyse_session(session):
+            raise ValueError("NON_TRADING_SESSION")
+        if complete is not None and session > complete:
+            raise ValueError("FUTURE_OR_INCOMPLETE_SESSION")
+        if value is None or value <= 0:
+            raise ValueError("INVALID_CLOSE")
+        clean.append((session, value))
+    clean.sort(key=lambda item: item[0])
+    for (left, _), (right, _) in zip(clean, clean[1:]):
+        if left == right:
+            raise ValueError("DUPLICATE_SESSION")
+        if next_nyse_session(left, include_current=False) != right:
+            raise ValueError("MISSING_INTERNAL_SESSION")
     return [item[0] for item in clean], [item[1] for item in clean]
 
 
@@ -164,8 +184,13 @@ def _historical_quantile(closes: Sequence[float], horizon: int) -> dict[str, Any
     }
 
 
-def shadow_challengers(*, bars: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    dates, closes = _clean_bars(bars)
+def shadow_challengers(*, bars: Sequence[Mapping[str, Any]], cutoff_at: datetime | None = None) -> dict[str, Any]:
+    try:
+        dates, closes = _clean_bars(bars, cutoff_at=cutoff_at)
+    except ValueError as error:
+        return {"status": "INVALID_HISTORY", "reason": str(error), "version": CHALLENGER_VERSION,
+                "promotion_eligible": False, "models": [], "directional_model_count": 0,
+                "directional_agreement": None}
     if len(closes) < 64:
         return {
             "status": "INSUFFICIENT_HISTORY", "version": CHALLENGER_VERSION,
@@ -180,14 +205,14 @@ def shadow_challengers(*, bars: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         logistic = _logistic_shadow(closes, horizon)
         if logistic.get("status") == "SHADOW_UNCALIBRATED":
             models.append({
-                **logistic, "model_version": f"regularized-logistic-direction-v1-{horizon}d",
+                **logistic, "model_version": f"regularized-logistic-direction-v2-{horizon}d",
                 "horizon_sessions": horizon,
                 "path": [{"session": horizon, "date": target_date.isoformat()}],
             })
         quantile = _historical_quantile(closes, horizon)
         if quantile.get("status") == "SHADOW_UNCALIBRATED":
             models.append({
-                **quantile, "model_version": f"historical-quantile-baseline-v1-{horizon}d",
+                **quantile, "model_version": f"historical-quantile-baseline-v2-{horizon}d",
                 "horizon_sessions": horizon,
                 "path": [{
                     "session": horizon, "date": target_date.isoformat(),
@@ -198,7 +223,7 @@ def shadow_challengers(*, bars: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         ewma = _ewma_volatility(closes, horizon)
         if ewma.get("status") == "SHADOW_UNCALIBRATED":
             models.append({
-                **ewma, "model_version": f"ewma-volatility-reference-v1-{horizon}d",
+                **ewma, "model_version": f"ewma-volatility-reference-v2-{horizon}d",
                 "horizon_sessions": horizon, "direction": "NEUTRAL",
                 "path": [{
                     "session": horizon, "date": target_date.isoformat(), "center_return": 0.0,
@@ -211,6 +236,9 @@ def shadow_challengers(*, bars: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "status": "SHADOW_ONLY", "version": CHALLENGER_VERSION, "promotion_eligible": False,
         "models": models, "directional_model_count": len(directional),
         "directional_agreement": agreement,
+        "history_contract": {"status": "CONTIGUOUS_NYSE_SESSIONS", "sessions": len(dates),
+                             "first": dates[0].isoformat(), "last": dates[-1].isoformat(),
+                             "cutoff_checked": cutoff_at is not None},
         "limitations": [
             "Raw logistic scores are not calibrated probabilities.",
             "Models are ticker-specific and share the same limited price history.",
