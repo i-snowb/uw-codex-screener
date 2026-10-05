@@ -12,6 +12,7 @@ import signal
 import sqlite3
 import subprocess
 import tempfile
+import time
 from typing import Any
 
 from .private_io import ensure_private_directory, harden_sqlite_files, write_private_bytes
@@ -19,6 +20,9 @@ from .private_io import ensure_private_directory, harden_sqlite_files, write_pri
 AUDIT_SCHEMA = "codex-screener-agent-audit/v1"
 PROMPT_VERSION = "morning-evidence-synthesis-v2"
 MAX_ARTIFACT_BYTES = 16 * 1024 * 1024
+ANALYST_PROVIDER = "screener_https"
+ANALYST_ENDPOINT = "https://chatgpt.com/backend-api/codex"
+ANALYST_TRANSPORT = "HTTPS_SSE"
 DISABLED_FEATURES = (
     "shell_tool", "unified_exec", "apps", "plugins", "hooks", "remote_plugin",
     "browser_use", "browser_use_external", "browser_use_full_cdp_access",
@@ -110,7 +114,15 @@ def analyst_command(cli: Path, *, workspace: Path, schema: Path, model: str, rea
                "--model", model, "--output-schema", str(schema.resolve()),
                "-c", 'approval_policy="never"', "-c", 'web_search="disabled"',
                "-c", 'project_doc_max_bytes=0',
-               "-c", 'model_reasoning_effort=' + json.dumps(reasoning)]
+               "-c", 'model_reasoning_effort=' + json.dumps(reasoning),
+               "-c", 'model_provider=' + json.dumps(ANALYST_PROVIDER),
+               "-c", 'model_providers.screener_https.name="OpenAI ChatGPT HTTPS"',
+               "-c", 'model_providers.screener_https.base_url=' + json.dumps(ANALYST_ENDPOINT),
+               "-c", 'model_providers.screener_https.wire_api="responses"',
+               "-c", 'model_providers.screener_https.requires_openai_auth=true',
+               "-c", 'model_providers.screener_https.supports_websockets=false',
+               "-c", 'model_providers.screener_https.request_max_retries=2',
+               "-c", 'model_providers.screener_https.stream_max_retries=2']
     for feature in DISABLED_FEATURES:
         command += ["--disable", feature]
     return command + ["-"]
@@ -123,23 +135,45 @@ def bounded_process(command: list[str], *, directory: Path, cwd: Path, timeout: 
     started = now_text()
     stdout_path, stderr_path = directory / "stdout.log", directory / "stderr.log"
     timed_out = False
+    wall_started, monotonic_started = time.time(), time.monotonic()
     with stdout_path.open("xb") as stdout, stderr_path.open("xb") as stderr:
         os.fchmod(stdout.fileno(), 0o600)
         os.fchmod(stderr.fileno(), 0o600)
         process = subprocess.Popen(command, cwd=cwd, env=environment, stdin=subprocess.PIPE,
                                    stdout=stdout, stderr=stderr, start_new_session=True)
+        pending_input = stdin
         try:
-            process.communicate(stdin, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            os.killpg(process.pid, signal.SIGTERM)
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait(timeout=5)
+            while True:
+                # Darwin's monotonic clock pauses during sleep. Wall time must
+                # also consume the allowance so waking cannot resume expired work.
+                elapsed = max(time.time() - wall_started, time.monotonic() - monotonic_started)
+                remaining = timeout - elapsed
+                if remaining <= 0:
+                    timed_out = True
+                    break
+                try:
+                    process.communicate(pending_input, timeout=min(1.0, remaining))
+                    timed_out = time.time() - wall_started >= timeout
+                    break
+                except subprocess.TimeoutExpired:
+                    pending_input = None
+        finally:
+            if process.poll() is None:
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait(timeout=5)
+            if process.stdin is not None:
+                process.stdin.close()
     result = {"started_at": started, "finished_at": now_text(), "exit_code": process.returncode,
-              "timed_out": timed_out, "stdout_sha256": file_digest(stdout_path),
+              "timed_out": timed_out, "timeout_seconds": timeout,
+              "timeout_clock": "WALL_AND_MONOTONIC", "wall_elapsed_seconds": round(time.time() - wall_started, 3),
+              "stdout_sha256": file_digest(stdout_path),
               "stderr_sha256": file_digest(stderr_path),
               "logs_within_limit": max(stdout_path.stat().st_size, stderr_path.stat().st_size) <= MAX_ARTIFACT_BYTES}
     immutable_json(directory / "process.json", result)

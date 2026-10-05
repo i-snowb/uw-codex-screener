@@ -190,6 +190,7 @@ origin frozen.
 | Topic | Guide |
 | --- | --- |
 | Daily collection and enrichment | [Daily agent runbook](docs/daily-agent-runbook.md) |
+| Unattended runner and current operating limitations | [Unattended runner](docs/unattended-runner.md) |
 | Local app and portable archive | [Dashboard guide](docs/local-dashboard-app.md) |
 | Selective intraday conditioning | [Intraday refresh](docs/intraday-refresh.md) |
 | Provider request reserve | [Request-budget policy](docs/provider-request-budget.md) |

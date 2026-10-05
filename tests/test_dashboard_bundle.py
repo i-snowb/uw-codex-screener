@@ -85,6 +85,8 @@ class DashboardBundleTests(unittest.TestCase):
             self.assertIn("./assets/app.css", index)
             self.assertIn("./assets/app.js", index)
             self.assertIn("fetch('./data/latest.json'", script)
+            self.assertIn("fetch('./data/service-status.json'", script)
+            self.assertIn("MORNING ${serviceStatus.status}", script)
             self.assertNotIn('const DATA={"', script)
             self.assertEqual([], daily["entries"])
             self.assertIn("const DATA=", portable)

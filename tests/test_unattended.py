@@ -114,6 +114,14 @@ class AuditTests(unittest.TestCase):
         self.assertIn('approval_policy="never"', command)
         self.assertIn("--ignore-user-config", command)
         self.assertIn("read-only", command)
+        self.assertIn('model_provider="screener_https"', command)
+        self.assertIn('model_providers.screener_https.base_url="https://chatgpt.com/backend-api/codex"', command)
+        self.assertIn('model_providers.screener_https.supports_websockets=false', command)
+        self.assertIn('model_providers.screener_https.requires_openai_auth=true', command)
+        self.assertIn('model_providers.screener_https.request_max_retries=2', command)
+        self.assertNotIn("danger", " ".join(command).lower())
+        self.assertNotIn("insecure", " ".join(command).lower())
+        self.assertNotIn("ssl_verify=false", " ".join(command).lower())
         for item in audit.DISABLED_FEATURES:
             self.assertIn(item, command)
 
@@ -173,6 +181,27 @@ class AuditTests(unittest.TestCase):
             self.assertTrue(result["timed_out"])
             self.assertNotEqual(0, result["exit_code"])
             self.assertTrue((directory / "process.json").exists())
+
+    def test_sleep_consumes_process_allowance_even_if_monotonic_clock_pauses(self):
+        with tempfile.TemporaryDirectory() as temp, \
+             patch.object(audit.time, "time", side_effect=[100.0, 160.0, 160.0]), \
+             patch.object(audit.time, "monotonic", return_value=10.0):
+            result = audit.bounded_process([sys.executable, "-c", "import time; time.sleep(20)"],
+                directory=Path(temp) / "process", cwd=Path(temp), timeout=30,
+                environment=audit.analyst_environment())
+            self.assertTrue(result["timed_out"])
+            self.assertEqual(60, result["wall_elapsed_seconds"])
+            self.assertNotEqual(0, result["exit_code"])
+
+    def test_process_retains_stdin_and_logs_across_polling(self):
+        with tempfile.TemporaryDirectory() as temp:
+            result = audit.bounded_process([sys.executable, "-c",
+                "import sys,time; value=sys.stdin.read(); time.sleep(1.1); print(value)"],
+                directory=Path(temp) / "process", cwd=Path(temp), timeout=5,
+                environment=audit.analyst_environment(), stdin=b"synthetic evidence")
+            self.assertFalse(result["timed_out"])
+            self.assertEqual(0, result["exit_code"])
+            self.assertEqual("synthetic evidence\n", (Path(temp) / "process/stdout.log").read_text())
 
 
 class RunnerTests(unittest.TestCase):
@@ -410,6 +439,9 @@ class RunnerTests(unittest.TestCase):
         value = installer.plist(config(), Path("/tmp/config"), Path("/tmp/logs"))
         self.assertNotIn("KeepAlive", value)
         self.assertEqual(300, value["StartInterval"])
+        self.assertEqual([{"Weekday": day, "Hour": 6, "Minute": 30} for day in range(1, 6)], value["StartCalendarInterval"])
+        self.assertIn("-is", value["ProgramArguments"])
+        self.assertTrue(value["ProgramArguments"][3].endswith("run_morning_service.py"))
         self.assertIn("--audit-accepted", value["ProgramArguments"])
         self.assertNotIn("API_KEY", json.dumps(value))
         server = installer.server_plist(config(), Path("/tmp/logs"))
@@ -417,6 +449,8 @@ class RunnerTests(unittest.TestCase):
         self.assertNotIn("--live", server["ProgramArguments"])
         validation = installer.validation_plist(config(), Path("config"), Path("source"), Path("validation"))
         self.assertNotIn("StartInterval", validation)
+        self.assertNotIn("StartCalendarInterval", validation)
+        self.assertTrue(validation["ProgramArguments"][3].endswith("run_unattended_morning.py"))
         self.assertNotIn("KeepAlive", validation)
         self.assertIn("--validate-source", validation["ProgramArguments"])
         self.assertTrue(Path(validation["ProgramArguments"][-1]).is_absolute())
@@ -432,6 +466,24 @@ class RunnerTests(unittest.TestCase):
                 with patch.object(installer.subprocess, "run", return_value=type("Result", (), {"stdout": output})()):
                     with self.assertRaises(ValueError):
                         installer.verify_launchd_context(root)
+
+    def test_upgrade_refuses_foreign_or_linked_job(self):
+        import plistlib
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / (installer.LABEL + ".plist")
+            value = installer.plist(config(), Path("config"), Path("logs"))
+            target.write_bytes(plistlib.dumps(value))
+            self.assertEqual(target.read_bytes(), installer.verify_owned_plist(target, config()))
+            value["WorkingDirectory"] = "/another/operator"
+            target.write_bytes(plistlib.dumps(value))
+            with self.assertRaisesRegex(ValueError, "another operator"):
+                installer.verify_owned_plist(target, config())
+            other = Path(temp) / "linked.plist"
+            other.write_bytes(target.read_bytes())
+            target.unlink()
+            target.symlink_to(other)
+            with self.assertRaisesRegex(ValueError, "linked"):
+                installer.verify_owned_plist(target, config())
 
     def test_legacy_identity_remains_unknown_and_trusted_identity_is_visible(self):
         entry = source(1)["watchlist"][0]

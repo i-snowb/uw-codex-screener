@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import signal
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,7 @@ from morning_edge.data_health import run_health, assert_publishable
 from morning_edge.evaluation import register_run, update_evaluations, EVALUATION_VERSION, _path_targets
 from morning_edge.price_trial import attach_trial
 from morning_edge.unattended import (
+    ANALYST_PROVIDER, ANALYST_ENDPOINT, ANALYST_TRANSPORT,
     AUDIT_SCHEMA, PROMPT_VERSION, analyst_command, analyst_environment, append_audit,
     atomic_json, bounded_process, digest, encoded, evidence_packet, file_digest,
     immutable_bytes, immutable_json, now_text, parse_codex_events, read_object,
@@ -171,6 +173,8 @@ class Runner:
         public = {key: self.state.get(key) for key in ("schema", "session_date", "validation_only", "status", "stage", "reason", "updated_at", "run_id")}
         public.update(recommendations_enabled=False, external_outage_monitor_configured=False)
         atomic_json(self.status_path, public)
+        if not self.validation:
+            atomic_json(ROOT / "dashboard-app/data/pipeline-status.json", public)
         print(json.dumps(public, sort_keys=True), flush=True)
 
     def remaining(self, maximum: int) -> float:
@@ -262,6 +266,8 @@ class Runner:
                  "runtime_reported_model": None, "resolved_model_revision": None,
                  "model_identity_status": "REQUESTED_ONLY_RUNTIME_ID_UNAVAILABLE", "output_sha256": None,
                  "tool_policy": "NO_TOOLS_READ_ONLY_APPROVAL_NEVER", **cli_metadata}
+        audit.update(model_provider=ANALYST_PROVIDER, endpoint=ANALYST_ENDPOINT,
+                     requested_transport=ANALYST_TRANSPORT, tls_verification="ENABLED")
         immutable_json(attempt / "request.json", audit)
         try:
             with tempfile.TemporaryDirectory(prefix="screener-analyst-") as workspace:
@@ -298,6 +304,7 @@ class Runner:
         return {"batch": result, "audit": audit, "audit_id": digest(encoded(audit))}
 
     def execute(self, source: Path | None, ticker_limit: int | None, recovery_capture: Path | None = None) -> None:
+        self.remaining(1)
         cli_metadata = cli_preflight(self.config)
         self.status("RUNNING", "preflight")
         run = self.artifact("source", lambda: read_object(source) if self.validation else
@@ -346,6 +353,7 @@ class Runner:
             "shell": build_shell(run=publication, app_root=ROOT / "dashboard-app"),
             "latest": publish_latest_data(run=publication, app_root=ROOT / "dashboard-app")})
         self.artifact("verification", lambda: self.verify_publication(run, batches))
+        self.remaining(1)
         self.status("COMPLETE", "verification", "Forecasts, agent audits, archived publication, and loopback readback verified. Research only.")
         atomic_json(ROOT / "dashboard-app/data/pipeline-status.json", read_object(self.status_path))
 
@@ -484,7 +492,9 @@ def main(argv=None) -> int:
             return 0
         due = schedule_state(datetime.now(UTC), config["start_et"], config["deadline_et"])
         if not validation and due != "DUE":
-            runner.status(due, "calendar", "No new capture or model call outside the configured morning window.")
+            # A missed deadline must not erase the stage and cause of a failure.
+            if runner.state.get("status") != "FAILED":
+                runner.status(due, "calendar", "No new capture or model call outside the configured morning window.")
             return 2 if due == "MISSED_DEADLINE" else 0
         try:
             runner.execute(args.validate_source, args.ticker_limit, args.recover_capture)
@@ -498,4 +508,7 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
+    def stop_at_deadline(_signal, _frame):
+        raise TimeoutError("morning supervisor stopped work at the absolute deadline")
+    signal.signal(signal.SIGTERM, stop_at_deadline)
     raise SystemExit(main())

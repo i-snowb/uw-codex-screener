@@ -10,6 +10,7 @@ let replayActive=false,replaySelection='',navigationEpoch=0,appliedDigest=initia
 let refreshFailures=0,refreshInFlight=false;
 let pipelineStatus=null;
 let unattendedStatus=null;
+let serviceStatus=null;
 const detailLoads=new Map();
 async function loadDetail(entry){
   if(!entry?.detail||entry.detailLoaded)return;
@@ -32,6 +33,10 @@ try{
 try{
   const r=await fetch('./data/unattended-status.json',{cache:'no-store'});
   if(r.ok)unattendedStatus=await r.json();
+}catch{}
+try{
+  const r=await fetch('./data/service-status.json',{cache:'no-store'});
+  if(r.ok)serviceStatus=await r.json();
 }catch{}
 try{
   const catalogResponse=await fetch('./data/publications.json',{cache:'no-store'});
@@ -380,6 +385,7 @@ function renderAvailability(){
   status.hidden=false;
   if(replayActive){status.textContent=`REPLAY — frozen publication as of ${DATA.asOf}. Automatic refresh is paused until you select Live.`;return}
   if(refreshFailures){status.textContent=`REFRESH FAILED (${refreshFailures}) — showing the last stored publication as of ${DATA.asOf}. No new data is confirmed.`;return}
+  if(serviceStatus&&['NOT_STARTED','FAILED','STALLED','MISSED_DEADLINE','INTEGRITY_INVALID'].includes(serviceStatus.status)){status.textContent=`MORNING ${serviceStatus.status.replaceAll('_',' ')} · ${serviceStatus.reason} · checked ${serviceStatus.checked_at} · stored publication ${DATA.asOf}.`;return}
   if(unattendedStatus&&!['COMPLETE','WAITING_FOR_START','MARKET_CLOSED'].includes(unattendedStatus.status)){status.textContent=`UNATTENDED ${unattendedStatus.status} · ${unattendedStatus.stage||'unknown stage'} · ${unattendedStatus.reason||''} · checked ${unattendedStatus.updated_at||'unknown'} · publication ${DATA.asOf}.`;return}
   if(pipelineStatus&&!['PUBLISHED','COMPLETE'].includes(pipelineStatus.status)){status.textContent=`PIPELINE ${pipelineStatus.status} · ${pipelineStatus.stage||'unknown stage'} · ${pipelineStatus.reason||''} · latest publication remains ${DATA.asOf}.`;return}
   if(!Number.isFinite(age)||age>6){status.textContent=`${DATA.mode==='RETROSPECTIVE_REPROCESSING'?'RETROSPECTIVE RECALCULATION · ':''}STALE STORED DATA — as of ${DATA.asOf||'unknown'}${Number.isFinite(age)?` (${age.toFixed(1)} hours old)`:''}. This is not a live market quote.`;return}
@@ -400,8 +406,10 @@ async function refreshLatest(){
   try{
   const pipelineResponse=await fetch('./data/pipeline-status.json',{cache:'no-store'});
   const unattendedResponse=await fetch('./data/unattended-status.json',{cache:'no-store'});
+  const serviceResponse=await fetch('./data/service-status.json',{cache:'no-store'});
   if(unattendedResponse.ok)unattendedStatus=await unattendedResponse.json();
   if(pipelineResponse.ok)pipelineStatus=await pipelineResponse.json();
+  if(serviceResponse.ok)serviceStatus=await serviceResponse.json();
   const manifestResponse=await fetch('./data/live-status.json',{cache:'no-store'});
   if(!manifestResponse.ok)throw new Error(`Publication status failed (${manifestResponse.status})`);
   const manifest=await manifestResponse.json();

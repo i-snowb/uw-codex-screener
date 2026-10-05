@@ -208,13 +208,14 @@ class DashboardRefreshRegressionTests(unittest.TestCase):
 const assert=require('node:assert/strict'),{createHash,webcrypto}=require('node:crypto');
 const crypto=webcrypto;
 let DATA={entries:[{ticker:'QCOM'}],dataVersion:'unchanged',publications:{entries:[]}},selected=0;
-let replayActive=false,replaySelection='',navigationEpoch=0,appliedDigest=null,refreshFailures=0,refreshInFlight=false,pipelineStatus=null,unattendedStatus=null;
+let replayActive=false,replaySelection='',navigationEpoch=0,appliedDigest=null,refreshFailures=0,refreshInFlight=false,pipelineStatus=null,unattendedStatus=null,serviceStatus=null;
 const document={hidden:false},select={value:'',innerHTML:'',hidden:true},byId=()=>select,esc=String;
 let calls=[],payload=JSON.stringify({entries:[{ticker:'QCOM',value:2}],dataVersion:'unchanged'}),hold=null;
 const renderAvailability=()=>{},showRefreshError=()=>{refreshFailures++};
 const applyPublication=next=>{DATA={...next,publications:DATA.publications}};
 const publicationLoader=async url=>({entries:[{ticker:'QCOM',value:url?'loaded':0}],dataVersion:url});
 async function fetch(url){
+  if(url.includes('service-status'))return {ok:true,json:async()=>({status:'MISSED_DEADLINE'})};
   if(url.includes('unattended-status'))return {ok:true,json:async()=>({status:'RUNNING',stage:'analysis'})};
   if(url.includes('pipeline-status'))return {ok:true,json:async()=>({status:'FAILED',stage:'capture'})};
   if(url.includes('publications'))return {ok:true,json:async()=>({entries:[]})};
@@ -228,6 +229,7 @@ async function fetch(url){
   replayActive=true;await refreshLatest();assert.equal(calls.length,0);
   replayActive=false;await refreshLatest();assert.equal(calls.length,2);assert.equal(DATA.entries[0].value,2);
   assert.equal(unattendedStatus.status,'RUNNING');
+  assert.equal(serviceStatus.status,'MISSED_DEADLINE');
   refreshFailures=2;await refreshLatest();assert.equal(calls.length,3);assert.equal(refreshFailures,0);
   assert.ok(calls[2].includes('live-status'));
   payload=JSON.stringify({entries:[{ticker:'QCOM',value:3}],dataVersion:'unchanged'});

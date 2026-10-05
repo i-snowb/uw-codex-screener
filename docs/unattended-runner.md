@@ -4,14 +4,22 @@ This route does not depend on opening a Codex task. macOS launches a bounded Pyt
 orchestrator. It calls `codex exec` with the explicitly configured `gpt-6-astra`
 model and `high` reasoning effort through the owner's existing ChatGPT CLI login.
 The analyst receives a bounded evidence projection through standard input. Provider
+transport is certificate-verified HTTPS/SSE to the same ChatGPT Codex endpoint.
+The CLI provider explicitly disables WebSockets and bounds HTTP/stream retries.
+It retains the same ChatGPT login, model and reasoning effort; no API key or model
+fallback is introduced. Audits retain endpoint, transport selection and TLS policy.
+The built-in WebSocket route produced an `UnknownIssuer` failure during validation;
+certificate verification must not be bypassed to hide that failure. Provider
 credentials are loaded only inside the separate capture process, never in the
 analyst environment or evidence packet. Approve this evidence transfer to OpenAI
 before enabling the route.
 
 ## Completion contract
 
-The default window is 06:45–08:00 America/New_York, on NYSE sessions. A five-minute
-launchd trigger resumes unfinished work. The runner checks New York time itself,
+The default collection window is 06:45–08:00 America/New_York, on NYSE sessions.
+The morning service starts fifteen minutes earlier, holds the machine awake
+through 08:15, and supervises bounded retries. A weekday 06:30 calendar trigger
+and five-minute launchd interval start the service. The runner checks New York time itself,
 so a change to the Mac's display timezone does not shift the window. It refuses new
 work after the deadline and records `MISSED_DEADLINE`. It does not backdate missed
 days or fill gaps with invented prospective predictions.
@@ -29,6 +37,20 @@ deadline is the tighter bound. Existing provider request budgets and reserve gat
 still apply. Whole-workflow locks prevent duplicate runners. Atomic immutable
 artifacts, durable attempt counters, and content hashes support crash recovery.
 Completed batches are not called again. Forecast registration remains idempotent.
+Timeouts use both wall and monotonic time. Time spent asleep counts against the
+limit. At 08:00 the supervisor stops its owned worker; the worker cleans up its
+capture/analyst subprocess group. No new work starts after that deadline.
+
+The service checks saved progress every twenty seconds. It requests a local Mac
+notification for failure, ten minutes without progress, no capture attempt by
+06:55, or a missed 08:00 deadline. Repeated identical alerts are suppressed.
+Notification requests do not prove delivery; macOS notification permissions apply.
+Failed attempts wait five minutes before another attempt, within the unchanged
+two-attempt budget and absolute deadline. Monitoring continues during the wait.
+The dashboard shows service status separately from the stored publication date.
+The chat monitor checks every ten minutes during 06:45–08:15. It is read-only and
+cannot notify while the desktop app or computer is unavailable. A delayed chat
+check does not mean the pipeline completed at that check's time.
 
 A user-authorized late recovery can use a separate private configuration with
 `authorized_recovery_date` set to that day's New York date and a deadline no
@@ -113,7 +135,10 @@ language model's prose into a calibrated forecast or a demonstrated trading edge
    exact label. A changed source or configuration requires a new validation.
 5. Generate and inspect the two production LaunchAgents with `scripts/install_unattended_agent.py`.
    Installation is explicit, requires a successful full validation, and refuses
-   to replace an existing plist. The second job owns the loopback-only dashboard
+   to replace an existing plist unless `--install --upgrade` is supplied. Upgrade
+   inspects both existing jobs, requires current full launchd validation, saves
+   the previous plists, and restores an individual job if its bootstrap fails.
+   The second job owns the loopback-only dashboard
    service independently of Codex. Installation first checks that port 8765 serves
    this operator's current publication. An existing manual server is not killed;
    the managed server retries once per minute until that port is released. Verify
@@ -131,7 +156,13 @@ login screen, network loss, expired authentication, account limits, provider out
 full disk, and macOS privacy permissions can prevent completion. `caffeinate -is`
 prevents idle sleep while the process is running; it cannot start a sleeping or
 powered-off computer. It is not a wake schedule. Configure a pre-window wake event
-or keep the Mac awake/on AC; changing power settings requires separate approval.
+or keep the Mac awake/on AC. Configure `pmset repeat wake MTWRF 06:30:00` through
+macOS administrator authentication, then verify with `pmset -g sched`. Inspect
+existing repeating power events first: `pmset repeat` replaces that schedule.
+Calendar triggers use the Mac's local timezone, so keep that timezone aligned
+with New York or regenerate the trigger. The worker still enforces ET boundaries.
+Closed-lid or forced sleep can defeat this setup; test the actual overnight AC
+power and lid configuration. A powered-off Mac cannot be woken by a wake-only event.
 The dashboard server must also run independently for HTTP verification to pass.
 
 This local runner cannot notify you while the Mac is offline. An external dead-man
@@ -154,3 +185,64 @@ For missed days, preserve the gap, recover available market data separately, and
 label any later analysis retrospective. Never change a past cutoff to create a
 successful-looking prospective record. To disable the job, boot out the exact
 launchd label and retain the plist and audit files for investigation.
+
+## September 29 reliability deployment
+
+The weekday 06:30 wake event was authorized through macOS and verified with
+`pmset -g sched`. Both inspected production LaunchAgents were upgraded. Their
+previous plists are retained in `outputs/unattended-setup/reliability-20260929/`.
+The morning service exited successfully outside its operating window; the
+dashboard job was running and served the new service-status endpoint.
+
+The original frozen-evidence validation stopped a WebSocket/certificate-failed
+NOK/NVDA batch after 360.046 seconds. Its failed audit remains intact. The same
+batch passed on HTTPS/SSE in 150.165 seconds. The replacement full launchd
+validation at `outputs/unattended-validation/reliability-https-20260929/` completed
+with fourteen validated tickers, seven verified batch audits, and launchd exit 0.
+The validated source-code SHA-256 is
+`df10b0525b39fecf8c399287d883b85ea94584bda6ea235e9b27dde093b77904`.
+
+Verification also included 380 passing tests, compilation of 117 Python files,
+JavaScript syntax validation, and the public-release builder. The test suite
+emitted existing SQLite resource warnings; it did not fail. No production
+forecasts were registered by validation, and the existing publication hash was
+unchanged. Its market-data cutoff remains September 11 ET. A fresh scheduled
+capture/publication and the actual overnight wake still require the next session
+as operational proof. Local notification requests do not verify delivery, and
+no independent off-machine outage monitor is configured.
+
+## October 5 operational status: capture unresolved
+
+The September 29 frozen-evidence validation proved that the configured analyst
+route could validate all fourteen tickers. It did not prove fresh provider
+collection or scheduled end-to-end production completion. Passing offline tests,
+an installed LaunchAgent, or a running dashboard must not be reported as proof
+that the daily workflow is ready.
+
+Saved production receipts inspected on October 5 show:
+
+| NYSE session | Capture execution, America/New_York | Result |
+| --- | --- | --- |
+| October 1 | 06:45:02–07:05:02; retry 07:10:18–07:30:19 | Both attempts timed out; no registered capture artifact. |
+| October 2 | 06:45:02–07:05:02; retry 07:10:17–07:30:18 | Both attempts timed out; no registered capture artifact. |
+| October 5 | 07:34:42–07:59:10 | First attempt timed out; no registered capture artifact; morning deadline missed. |
+
+The configured capture limit is 1,200 seconds. The October 5 receipt recorded
+1,467.779 wall seconds before termination; this does not establish why timeout
+handling was delayed. The inspected capture stdout and stderr files are empty.
+The underlying blocking request or operation, and the cause of the late October 5
+start, remain unknown. Partial benchmark and company-context files are not a
+completed capture. No new agent analysis or publication followed these failures.
+
+At the October 5 11:55 ET inspection, the latest saved dashboard publication was
+still September 11 at 23:47 ET. The latest unattended state marked `COMPLETE` was
+the September 11 recovery run. The October 5 service check reported
+`MISSED_DEADLINE`, with the original capture failure preserved. These are dated
+observations, not a claim about every underlying dataset or future runs.
+
+The next repair must identify the blocking capture step, add useful per-step
+progress and bounded request diagnostics, then verify fresh ingestion under
+launchd followed by numerical registration, all fourteen audited analyses,
+research-control records, archived publication and matching loopback readback.
+Do not reset durable attempt counters or invent historical prospective forecasts.
+Publishing this source state does not resolve this production incident.

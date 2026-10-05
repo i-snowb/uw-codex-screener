@@ -1,5 +1,5 @@
 {
-  "file_count": 144,
+  "file_count": 146,
   "files": [
     {
       "bytes": 464,
@@ -32,9 +32,9 @@
       "sha256": "545c2072b84b34591a0957e8979bd8881176d1f2e7382125aba6e91bb6e3a769"
     },
     {
-      "bytes": 9621,
+      "bytes": 9726,
       "path": "README.md",
-      "sha256": "bb110b2c8f4e807a2f5c380cae45e8dd4e5e936839b3a51fa80277196756cbff"
+      "sha256": "f0d88ba594ac16eaf768048b6a04326594520bd08850caa281a9b5c051f50cde"
     },
     {
       "bytes": 1087,
@@ -47,9 +47,9 @@
       "sha256": "2b0ae60f34129e760bd91bbc1979e9a118bb12284ae1c06e814371d3baeb82f1"
     },
     {
-      "bytes": 166998,
+      "bytes": 167610,
       "path": "dashboard-app/assets/app.js",
-      "sha256": "7aa92b7e656ed75ee155daee0d0e825b438299b3e2df43669db4333e405deddb"
+      "sha256": "a4bb4c79c7e83599b2b3839f64c2e0c380a7ac835b7ef3dc88bc742a63066be7"
     },
     {
       "bytes": 6839,
@@ -122,9 +122,9 @@
       "sha256": "6c463632f210d8a4b2f239a19b9e2d2b1eb25ef38954c245b61a7bc48ddf1757"
     },
     {
-      "bytes": 9752,
+      "bytes": 15878,
       "path": "docs/unattended-runner.md",
-      "sha256": "b4360d5d9d3230bd11a782930fdcf47aaaff798e0050fbff6e285d25d1e1226f"
+      "sha256": "633bd9ef0a79988995cb9f44e2ba58ce117d653c3eade3c5f1467be9f277603a"
     },
     {
       "bytes": 7571,
@@ -147,9 +147,9 @@
       "sha256": "a1f2ca08c92a4c8cc5817493589ef4386a4e96d503a6a5262c949dc05d96270e"
     },
     {
-      "bytes": 28645,
+      "bytes": 29252,
       "path": "scripts/build_dashboard_bundle.py",
-      "sha256": "82a9e8270d7187dfbaaea9bb77fa21682a800fe9a818b6e0d5d9490593564366"
+      "sha256": "8e80cf4a4a82bf5eeb8dda0306a4115ca2971bbe9dcddd59d1029bd4e41882a7"
     },
     {
       "bytes": 2750,
@@ -212,9 +212,9 @@
       "sha256": "af2e91ad0fe73962e9d1ca20354afbaffb21ac7016810439745a69bf87a40a6e"
     },
     {
-      "bytes": 8615,
+      "bytes": 11455,
       "path": "scripts/install_unattended_agent.py",
-      "sha256": "dc093bc6ed3b1a877dd92aa7cb1eae209bfe1d681703ee0a0be06d4ca2271f8d"
+      "sha256": "a53e4d292ae84b7a4732db87421eddda68c51f7a453e62b0817a90097cd1a54d"
     },
     {
       "bytes": 2145,
@@ -252,6 +252,11 @@
       "sha256": "43ce0a9a7471fa4962ec67ea79a1f48172d5595a6e69a6151e94e588e4722303"
     },
     {
+      "bytes": 11040,
+      "path": "scripts/run_morning_service.py",
+      "sha256": "be18b80202f826927efd5ce7e182a7c3fb135780a2750b6aab451d3650e47fc6"
+    },
+    {
       "bytes": 6504,
       "path": "scripts/run_research_experiments.py",
       "sha256": "735e747d620a7068ed3a8b84ba969cc87e55d687f4512b5ccea12549ec109140"
@@ -262,14 +267,14 @@
       "sha256": "61a521b549f39a3fbe05ad2a1d0b247c9050ebbc26bf6e7e1123ab94b4f94e9b"
     },
     {
-      "bytes": 31664,
+      "bytes": 32394,
       "path": "scripts/run_unattended_morning.py",
-      "sha256": "36042be4aa9fed1ea7005e80449ed00b97199ddddd8ed2b190f32a8a8725d0e6"
+      "sha256": "352d9fe88ed6cc4f4c5fb5c6502d11fe5406db4c58a9c22cf7aa2ac69ae3c70c"
     },
     {
-      "bytes": 2289,
+      "bytes": 2318,
       "path": "scripts/serve_dashboard.py",
-      "sha256": "45d9e950761c167cd90f17e246564224d282bc912ddbf51b35d050f3c118f63f"
+      "sha256": "f45974a56205b7abb0b241efee63555801007a73c844f9391dd13b6ccaea1d81"
     },
     {
       "bytes": 4186,
@@ -502,9 +507,9 @@
       "sha256": "185ce8ff83e1a7100e6c8562604bbd90c5e8e4972f939987c2bc64427893a0a5"
     },
     {
-      "bytes": 15063,
+      "bytes": 16942,
       "path": "src/morning_edge/unattended.py",
-      "sha256": "86fb0d8397f91c6ff96b48b4ba0e9318fde10596d2476e9e69bfa359068850af"
+      "sha256": "562836d1f276f085f4d910d61d33145552ff1e2c915f8d4ed1be631f0879b4e3"
     },
     {
       "bytes": 6354,
@@ -512,9 +517,9 @@
       "sha256": "8dc69379979de57cfbd090c84e790f522fd3a90de226d9766fa2da6959b8be46"
     },
     {
-      "bytes": 17164,
+      "bytes": 17336,
       "path": "tests/test_assessment_regressions.py",
-      "sha256": "2c6b521401dab4e2ce7c04fa20ad083f2c258f69512cde42b983e91ff244d4cc"
+      "sha256": "add76420806da523fa5df29dc4bb7a10acd41fb3a6426d25fab29c8caa7852ca"
     },
     {
       "bytes": 31216,
@@ -557,9 +562,9 @@
       "sha256": "225fe43934ce03d9435883948bdc4b0c96426be75d224330f134517d4ec09aab"
     },
     {
-      "bytes": 6557,
+      "bytes": 6698,
       "path": "tests/test_dashboard_bundle.py",
-      "sha256": "da0eb5a812e9ece3ad5a41ef67b86600b8f6ece7a75de97c3fc907b50fa24fa0"
+      "sha256": "15337fe52a8a4e37005efd63c43493e06c507facd4492dde77a8322c5f8ca8de"
     },
     {
       "bytes": 1391,
@@ -637,6 +642,11 @@
       "sha256": "1dc749d1b78b737f700f39d4bc3188320c38fd9f94b78ce6bed11db853c35d5f"
     },
     {
+      "bytes": 6755,
+      "path": "tests/test_morning_service.py",
+      "sha256": "9aabe7e05c00780a4351c650a57cd6d282083f338d1ad0c887ebb6e5551d46e9"
+    },
+    {
       "bytes": 13199,
       "path": "tests/test_normalization.py",
       "sha256": "f32ac6f2c8e4298147821ba262948264a3f16838f512ef5625840b776791e99a"
@@ -712,9 +722,9 @@
       "sha256": "b582cabcbe27a68b6ccd2d2a6cb0ef73a80951c38ab59548e80e25c3053962c1"
     },
     {
-      "bytes": 27454,
+      "bytes": 30837,
       "path": "tests/test_unattended.py",
-      "sha256": "dc602724aee4be47af73f0728a222732cc468008f1185384dc244c1041fcf51f"
+      "sha256": "e7b6582d405676ef567cc2e7b19fa9d854cb008b2899d0a8f2276699b6b2b6c5"
     },
     {
       "bytes": 24483,

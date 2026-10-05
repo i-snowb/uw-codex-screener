@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta
 import os
 from pathlib import Path
 import plistlib
@@ -13,6 +14,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from morning_edge.unattended import encoded, digest, immutable_bytes, read_object, source_code_digest, verify_audit
+from morning_edge.private_io import write_private_bytes
 from run_unattended_morning import validate_config, cli_preflight
 
 LABEL = "com.codex-screener.morning"
@@ -20,10 +22,26 @@ SERVER_LABEL = "com.codex-screener.dashboard"
 VALIDATION_LABEL = "com.codex-screener.validation"
 
 
+def verify_owned_plist(target: Path, config: dict) -> bytes:
+    if target.is_symlink():
+        raise ValueError("refusing to replace a linked LaunchAgent")
+    previous = target.read_bytes()
+    value = plistlib.loads(previous)
+    allowed = {LABEL: {"run_unattended_morning.py", "run_morning_service.py"}, SERVER_LABEL: {"serve_dashboard.py"}}
+    if value.get("Label") != target.stem or value.get("WorkingDirectory") != str(ROOT):
+        raise ValueError("existing LaunchAgent belongs to another operator")
+    arguments = value.get("ProgramArguments", [])
+    if config["python"] not in arguments or not any(str(ROOT / "scripts" / script) in arguments for script in allowed[target.stem]):
+        raise ValueError("existing LaunchAgent has an unexpected program")
+    return previous
+
+
 def validation_plist(config: dict, config_path: Path, source: Path, directory: Path) -> dict:
     value = plist(config, config_path, directory.resolve())
     value["Label"] = VALIDATION_LABEL
     value.pop("StartInterval")
+    value.pop("StartCalendarInterval")
+    value["ProgramArguments"][3] = str(ROOT / "scripts/run_unattended_morning.py")
     value["ProgramArguments"] += ["--validate-source", str(source.resolve()),
                                    "--validation-directory", str(directory.resolve())]
     return value
@@ -44,10 +62,12 @@ def verify_launchd_context(directory: Path) -> dict:
 
 
 def plist(config: dict, config_path: Path, log_root: Path) -> dict:
+    guard = datetime.strptime(config["start_et"], "%H:%M") - timedelta(minutes=15)
     return {"Label": LABEL,
-            "ProgramArguments": ["/usr/bin/caffeinate", "-is", config["python"], str(ROOT / "scripts/run_unattended_morning.py"),
+            "ProgramArguments": ["/usr/bin/caffeinate", "-is", config["python"], str(ROOT / "scripts/run_morning_service.py"),
                                  "--config", str(config_path.resolve()), "--live", "--audit-accepted"],
             "WorkingDirectory": str(ROOT), "StartInterval": 300, "RunAtLoad": True,
+            "StartCalendarInterval": [{"Weekday": day, "Hour": guard.hour, "Minute": guard.minute} for day in range(1, 6)],
             "ProcessType": "Background", "LowPriorityIO": True, "Umask": 0o077,
             "ExitTimeOut": 20, "ThrottleInterval": 60,
             "EnvironmentVariables": {"PATH": "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin", "PYTHONDONTWRITEBYTECODE": "1"},
@@ -90,10 +110,13 @@ def main(argv=None) -> int:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--validated-run", type=Path)
     parser.add_argument("--install", action="store_true")
+    parser.add_argument("--upgrade", action="store_true", help="Back up and replace only this operator's inspected jobs; requires --install.")
     parser.add_argument("--launchd-validation", action="store_true")
     parser.add_argument("--validate-source", type=Path)
     parser.add_argument("--validation-directory", type=Path)
     args = parser.parse_args(argv)
+    if args.upgrade and not args.install:
+        parser.error("--upgrade requires --install")
     config = read_object(args.config)
     validate_config(config)
     if args.launchd_validation:
@@ -130,8 +153,17 @@ def main(argv=None) -> int:
         cli_preflight(config)
         targets = [(Path.home() / "Library/LaunchAgents" / (label + ".plist"), value)
                    for label, value in ((SERVER_LABEL, server_payload), (LABEL, payload))]
-        if any(target.exists() for target, _ in targets):
+        if not args.upgrade and any(target.exists() for target, _ in targets):
             raise ValueError("existing LaunchAgent must be inspected; refusing to overwrite")
+        previous = {}
+        if args.upgrade:
+            for target, _ in targets:
+                previous[target] = verify_owned_plist(target, config)
+                live = subprocess.run(["/bin/launchctl", "print", f"gui/{os.getuid()}/{target.stem}"],
+                                      check=True, capture_output=True, text=True, timeout=20)
+                if str(ROOT) not in live.stdout:
+                    raise ValueError("loaded job belongs to another operator")
+                immutable_bytes(args.output.parent / (target.stem + ".previous.plist"), previous[target])
         # Preflight the serving root before changing ownership of the existing service.
         from urllib.request import urlopen
         from morning_edge.unattended import file_digest
@@ -140,8 +172,19 @@ def main(argv=None) -> int:
         if digest(served) != file_digest(ROOT / "dashboard-app/data/latest.json"):
             raise ValueError("port 8765 is not serving this operator's dashboard")
         for target, value in targets:
-            immutable_bytes(target, value)
-            subprocess.run(["/bin/launchctl", "bootstrap", f"gui/{os.getuid()}", str(target)], check=True)
+            if args.upgrade:
+                subprocess.run(["/bin/launchctl", "bootout", f"gui/{os.getuid()}/{target.stem}"], check=True, timeout=20)
+                try:
+                    write_private_bytes(target, value)
+                    subprocess.run(["/bin/launchctl", "bootstrap", f"gui/{os.getuid()}", str(target)], check=True, timeout=20)
+                except Exception:
+                    subprocess.run(["/bin/launchctl", "bootout", f"gui/{os.getuid()}/{target.stem}"], capture_output=True, timeout=20)
+                    write_private_bytes(target, previous[target])
+                    subprocess.run(["/bin/launchctl", "bootstrap", f"gui/{os.getuid()}", str(target)], check=True, timeout=20)
+                    raise
+            else:
+                immutable_bytes(target, value)
+                subprocess.run(["/bin/launchctl", "bootstrap", f"gui/{os.getuid()}", str(target)], check=True, timeout=20)
             subprocess.run(["/bin/launchctl", "print", f"gui/{os.getuid()}/{target.stem}"], check=True)
     return 0
 
