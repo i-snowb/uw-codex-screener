@@ -17,7 +17,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
 from .agent_analysis import (
@@ -686,6 +686,8 @@ def _watchlist_regime(records: Sequence[dict[str, Any]]) -> dict[str, Any]:
 def build_morning_run(
     *, database: str | Path, capture_report: CurrentCaptureReport, tickers: Sequence[str] | None = None,
     cutoff_at: datetime | None = None, positions: Sequence[Mapping[str, Any]] = (),
+    progress: Callable[[dict], None] | None = None,
+    checkpoint_directory: Path | None = None,
 ) -> dict[str, Any]:
     """Build a JSON-ready shadow artifact from a prior bounded current capture.
 
@@ -704,14 +706,40 @@ def build_morning_run(
     if not symbols:
         raise ValueError("at least one ticker is required")
     symbols = tuple(str(item).strip().upper() for item in symbols)
-    if any(not item for item in symbols):
-        raise ValueError("ticker must not be empty")
+    if any(not item.replace('.', '').replace('-', '').isalnum() for item in symbols):
+        raise ValueError("ticker must contain only letters, digits, '.' or '-'")
     with EvidenceReader(database) as reader:
         records = []
+        context = None
+        if checkpoint_directory is not None:
+            from .unattended import source_code_digest, digest, encoded, read_object, immutable_json
+            watermark = reader._connection.execute(
+                "SELECT MAX(id) FROM snapshots WHERE as_of<=? AND retrieved_at<=?",
+                (timestamp_text(cutoff), timestamp_text(cutoff))).fetchone()[0]
+            context = digest(encoded({"code": source_code_digest(Path(__file__).resolve().parents[2]),
+                "database": str(Path(database).resolve()), "archive_watermark": watermark,
+                "cutoff": timestamp_text(cutoff), "report": capture_report.to_dict(), "positions": positions}))
         for ticker in symbols:
+            if progress:
+                progress({"ticker": ticker, "completed": len(records), "total": len(symbols)})
             # Reuse raw histories within a ticker, not across the full watchlist.
-            with EdgeAnalyzer(database) as edge_analyzer:
-                records.append(_ticker_record(reader, edge_analyzer, database, capture_report, ticker, cutoff, positions))
+            saved = checkpoint_directory / context / (ticker + '.json') if context else None
+            if saved is not None and saved.exists():
+                if saved.is_symlink():
+                    raise ValueError('linked calculation checkpoint')
+                cached = read_object(saved)
+                record = cached['record']
+                if (cached.get('context') != context or cached.get('sha256') != digest(encoded(record))
+                    or record.get('ticker') != ticker or record.get('action') != 'NO_RECOMMENDATION'):
+                    raise ValueError('calculation checkpoint verification failed')
+            else:
+                with EdgeAnalyzer(database) as edge_analyzer:
+                    record = _ticker_record(reader, edge_analyzer, database, capture_report, ticker, cutoff, positions)
+                if saved is not None:
+                    immutable_json(saved, {'context': context, 'record': record, 'sha256': digest(encoded(record))})
+            records.append(record)
+            if progress:
+                progress({"ticker": ticker, "completed": len(records), "total": len(symbols)})
         for benchmark in BENCHMARKS:
             bars = reader.normalize_bars(benchmark, cutoff_at=cutoff)
             simple = [{'date': bar.session_date.isoformat(), 'close': bar.close} for bar in bars]

@@ -344,6 +344,7 @@ def collect_enhanced(
     datasets: Sequence[EnhancedDataset | str] | None = None,
     max_transport_attempts_per_item: int = 3,
     generated_at: datetime | None = None,
+    progress: Callable[[dict], None] | None = None,
 ) -> EnhancedCaptureReport:
     """Capture compact current analytical feeds without consuming reserve."""
 
@@ -376,6 +377,9 @@ def collect_enhanced(
     results: list[EnhancedCaptureItem] = []
     circuit = CollectionCircuit()
     for dataset, planned_symbol in planned:
+        if progress:
+            progress({"ticker": planned_symbol, "dataset": dataset.value,
+                "completed": len(results), "total": len(planned)})
         spec = SPECS[dataset]
         ticker = planned_symbol if spec.scope == "ticker" else None
         endpoint = spec.endpoint.format(ticker=ticker or "")

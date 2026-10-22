@@ -501,6 +501,9 @@ def live_morning_run(
     output_path: Path,
     dashboard_path: Path | None = None,
     authorized_reserve_floor: int | None = None,
+    resume_checkpoint: Path | None = None,
+    checkpoint_context: dict | None = None,
+    progress: Callable[[str, dict], None] | None = None,
 ) -> dict[str, object]:
     """Collect, normalize, critic-check, persist, and render one safe live run."""
 
@@ -517,33 +520,29 @@ def live_morning_run(
         )
     symbols = tuple(tickers) or settings.watchlist
     selected = tuple(CurrentDataset(item) for item in datasets) if datasets else tuple(CurrentDataset)
-    with (
-        SnapshotStore(database_path) as store,
-        WeeklyRequestBudget(
-            settings.provider_usage_path,
-            weekly_cap=API_BASIC_DAILY_CAP,
-            protected_reserve=reserve_floor,
-            rolling_window=API_BASIC_ROLLING_WINDOW,
-        ) as request_budget,
-    ):
-        client = UnusualWhalesClient(settings.provider_api_key, request_budget=request_budget)
-        report = collect_current(
-            client=client,
-            snapshots=store,
-            request_budget=request_budget,
-            tickers=symbols,
-            datasets=selected,
-            max_transport_attempts_per_item=MAX_TRANSPORT_ATTEMPTS_PER_LOGICAL_ITEM,
-        )
-        enhanced_report = collect_enhanced(
-            client=client,
-            snapshots=store,
-            request_budget=request_budget,
-            tickers=symbols,
-            max_transport_attempts_per_item=MAX_TRANSPORT_ATTEMPTS_PER_LOGICAL_ITEM,
-        ) if report.preflight_passed and all(
-            item.status.value in {"captured", "empty"} for item in report.results
-        ) else None
+    from .capture_checkpoint import load_checkpoint, save_checkpoint
+    checkpoint = output_path.with_name(output_path.stem + "-collection.json")
+    notify = progress or (lambda stage, detail: None)
+    if resume_checkpoint:
+        notify("resume_verification", {})
+        report, enhanced_report, checkpoint_context = load_checkpoint(resume_checkpoint,
+            root=Path(__file__).resolve().parents[2], database=database_path,
+            tickers=tuple(symbols), datasets=selected)
+    else:
+        with (
+            SnapshotStore(database_path) as store,
+            WeeklyRequestBudget(settings.provider_usage_path, weekly_cap=API_BASIC_DAILY_CAP,
+                protected_reserve=reserve_floor, rolling_window=API_BASIC_ROLLING_WINDOW) as request_budget,
+        ):
+            client = UnusualWhalesClient(settings.provider_api_key, request_budget=request_budget)
+            report = collect_current(client=client, snapshots=store, request_budget=request_budget,
+                tickers=symbols, datasets=selected,
+                max_transport_attempts_per_item=MAX_TRANSPORT_ATTEMPTS_PER_LOGICAL_ITEM,
+                progress=lambda detail: notify("base_collection", detail))
+            enhanced_report = collect_enhanced(client=client, snapshots=store, request_budget=request_budget,
+                tickers=symbols, max_transport_attempts_per_item=MAX_TRANSPORT_ATTEMPTS_PER_LOGICAL_ITEM,
+                progress=lambda detail: notify("enhanced_collection", detail)) if report.preflight_passed and all(
+                    item.status.value in {"captured", "empty"} for item in report.results) else None
     unavailable = sum(item.status.value not in {"captured", "empty"} for item in report.results)
     enhanced_unavailable = (
         sum(item.status.value not in {"captured", "empty"} for item in enhanced_report.results)
@@ -570,28 +569,46 @@ def live_morning_run(
         failure["diagnostic_path"] = str(diagnostic)
         write_morning_run(diagnostic, failure)
         return failure
+    # Commit validated source references before any expensive local computation.
+    # Ordinary one-shot CLI calls retain their existing API; the daily gateway
+    # explicitly opts in by supplying checkpoint_context (including an empty map).
+    if not resume_checkpoint and checkpoint_context is not None:
+        notify("collection_checkpoint", {})
+        save_checkpoint(checkpoint, root=Path(__file__).resolve().parents[2], database=database_path,
+            base=report, extra=enhanced_report, context=checkpoint_context)
     # Freeze all base and enhanced evidence at the same completed-capture cutoff.
     cutoff = max(datetime.fromisoformat(value.replace("Z", "+00:00")) for value in [
         report.generated_at, enhanced_report.generated_at,
         *(item.fetched_at for item in (*report.results, *enhanced_report.results) if item.fetched_at),
     ])
-    artifact = build_morning_run(database=database_path, capture_report=report, cutoff_at=cutoff)
+    notify("local_calculation", {})
+    artifact = build_morning_run(database=database_path, capture_report=report, cutoff_at=cutoff,
+        progress=lambda detail: notify("local_calculation", detail),
+        checkpoint_directory=(resume_checkpoint or checkpoint).parent / "calculation-records"
+            if checkpoint_context is not None else None)
     enhanced_path = output_path.with_name(f"{output_path.stem}-enhanced.json")
     enhanced_ids = (
         [item.snapshot_id for item in enhanced_report.results if item.snapshot_id is not None]
         if enhanced_report is not None else []
     )
+    notify("enhanced_calculation", {})
     enhanced_artifact = build_enhanced_summary(database_path, snapshot_ids=enhanced_ids, cutoff_at=cutoff)
     enhanced_artifact["cutoff_at"] = artifact["cutoff_at"]
     enhanced_artifact["capture_report"] = enhanced_report.to_dict() if enhanced_report is not None else None
     from .evidence_join import attach_enhanced
     artifact = attach_enhanced(artifact, enhanced_artifact)
+    if resume_checkpoint:
+        from .unattended import file_digest
+        artifact['collection_recovery'] = {
+            'mode': 'SAME_SESSION_CHECKPOINT_NO_NEW_PROVIDER_REQUESTS',
+            'checkpoint_sha256': file_digest(resume_checkpoint), 'original_cutoff_at': artifact['cutoff_at']}
+    notify("artifact_write", {})
     enhanced_destination = write_morning_run(enhanced_path, enhanced_artifact)
     destination = write_morning_run(output_path, artifact)
     rendered = _render_morning_dashboard(destination, dashboard_path) if dashboard_path else None
     return {
         "status": "morning_run_complete",
-        "network_called": report.preflight_passed,
+        "network_called": bool(not resume_checkpoint and report.preflight_passed),
         "recommendations_enabled": False,
         "run_id": artifact["run_id"],
         "cutoff_at": artifact["cutoff_at"],
@@ -611,6 +628,7 @@ def live_morning_run(
         "reserve_override_applied": reserve_floor < API_BASIC_DAILY_RESERVE,
         "request_window_hours": 24,
         "request_window_cap": API_BASIC_DAILY_CAP,
+        "resumed_collection": bool(resume_checkpoint),
     }
 
 

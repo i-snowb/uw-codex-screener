@@ -8,7 +8,7 @@ keeps empirical analog frequencies separate from calibrated probabilities.
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date, datetime
 import json
 from math import erf, exp, isfinite, log, sqrt
@@ -22,6 +22,7 @@ from .challengers import shadow_challengers
 from .clock import next_nyse_session
 from .models import timestamp_text, utc_timestamp
 from .normalization import _provider_market_date
+from .snapshot_archive import ArchivePayloads, ArchiveSnapshot
 
 
 EDGE_FEATURE_VERSION = "edge-research-v3.2"
@@ -110,6 +111,7 @@ class EdgeAnalyzer:
         self.path = Path(database).resolve()
         self._connection = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
         self._connection.row_factory = sqlite3.Row
+        self._payloads = ArchivePayloads(self._connection)
         self._snapshot_cache: dict[tuple[str, str, str], tuple[RawSnapshot, ...]] = {}
 
     def close(self) -> None:
@@ -155,8 +157,8 @@ class EdgeAnalyzer:
             return list(cached)
         rows = self._connection.execute(
             """
-            SELECT s.id, s.dataset, s.as_of, s.retrieved_at, s.metadata_json, p.content_json
-            FROM snapshots AS s JOIN raw_payloads AS p ON p.content_hash=s.raw_payload_hash
+            SELECT s.id, s.dataset, s.as_of, s.retrieved_at, s.metadata_json, s.raw_payload_hash
+            FROM snapshots AS s
             WHERE s.symbol=? AND s.dataset=? AND s.as_of<=? AND s.retrieved_at<=?
             ORDER BY s.retrieved_at DESC, s.id DESC
             """,
@@ -165,12 +167,10 @@ class EdgeAnalyzer:
         result: list[RawSnapshot] = []
         for row in rows:
             metadata = json.loads(row["metadata_json"])
-            payload = json.loads(row["content_json"])
             result.append(
-                RawSnapshot(
-                    int(row["id"]), row["dataset"],
-                    self._market_date(metadata, payload, row["as_of"], row["dataset"]),
-                    row["as_of"], row["retrieved_at"], metadata, payload,
+                ArchiveSnapshot(
+                    int(row["id"]), row["dataset"], row["as_of"], row["retrieved_at"],
+                    metadata, row["raw_payload_hash"], self._payloads, self._market_date,
                 )
             )
         self._snapshot_cache[cache_key] = tuple(result)
@@ -481,7 +481,9 @@ class EdgeAnalyzer:
                     identities.setdefault(identity, row)
             requested_session = snapshot.market_date if len(key) == 2 or meta.get("historical_scope_verified") else None
             summary = self._flow_summary(
-                replace(snapshot, payload={"data": list(identities.values())}),
+                RawSnapshot(snapshot.snapshot_id, snapshot.dataset, snapshot.market_date,
+                    snapshot.as_of, snapshot.retrieved_at, snapshot.metadata,
+                    {"data": list(identities.values())}),
                 requested_session=requested_session,
             )
             empty = summary["alert_count"] == 0

@@ -246,3 +246,67 @@ launchd followed by numerical registration, all fourteen audited analyses,
 research-control records, archived publication and matching loopback readback.
 Do not reset durable attempt counters or invent historical prospective forecasts.
 Publishing this source state does not resolve this production incident.
+
+## October 22 processing and recovery repair
+
+The failed October 19–21 attempts each saved 334 provider snapshots, then timed
+out before producing a complete run. The old `capture` stage combined network
+collection and local calculations. Its status file did not distinguish the two,
+and the detailed collection report was not durable until calculations returned.
+The exact cause of every historical timeout is not established. Offline stack
+samples identified repeated decoding and retention of large raw histories in the
+normalization and feature layers.
+
+Archive readers now scan snapshot metadata first and load payloads on demand.
+Their LRU payload budget uses encoded payload size; decoded Python objects can
+occupy more memory. No historical dates, pages, source IDs, features or model
+variants are deliberately truncated by this change. Latest-only evidence reads
+no longer decode unrelated older snapshots.
+
+The daily gateway now writes an immutable collection checkpoint before local
+calculations. It binds the source version, database, universe, reports, snapshot
+identities, raw payload hashes and companion-file hashes. A retry reuses that
+checkpoint only in the same New York session. Changed code, another database,
+incomplete collection, missing evidence, hash failures or another session block
+resume; they do not silently trigger a fresh download. Completed ticker
+calculations also have private checkpoints bound to source code, cutoff, capture
+report, archive watermark and positions. Original failures and attempt counters
+remain intact. The two-attempt limit, 1,200-second capture allowance and 08:00
+deadline are unchanged.
+
+Progress now records the active dataset during collection and the active ticker
+during local calculation. Progress JSON is flushed to the private process log.
+Termination of the capture process also records its Python stack in private
+stderr. `RUNNING`, a source checkpoint, or finished local calculations are still
+not `COMPLETE`: audited model analysis, numerical registration, research-control
+records, archived publication and matching HTTP/hash readback remain mandatory.
+
+The verification for this repair is offline and retrospective. It does not
+register historical predictions, call the provider or model, or replace the live
+publication. A fresh scheduled production completion on the deployment machine
+remains required as operational proof.
+
+### Moving the service to another Mac
+
+1. Pull the source, install Python, and create the owner-private configuration
+   using absolute paths on the destination. Authenticate and pin the analyst
+   runtime on that Mac; do not put credentials or authentication files in Git.
+2. The unattended runner currently uses `data/` under its operator root for its
+   forecast, audit and research-control stores. Set `CODEX_SCREENER_DATABASE` and
+   `CODEX_SCREENER_PROVIDER_USAGE_DATABASE` to the matching absolute files under
+   that root. The general `.env.example` uses a different private runtime home;
+   do not assume its defaults establish the unattended runner's storage layout.
+   The runner now checks the collector's database path before any provider call
+   and refuses mismatched storage configuration.
+3. Transfer required private databases and artifacts through an owner-approved
+   private channel. Quiesce database writers and use a consistent SQLite backup;
+   copying only a live `.sqlite` file can omit its WAL. Keep historical failures,
+   audit metadata and forecast origins intact.
+4. Run offline checks, full-watchlist analyst validation and validation under
+   the destination's actual launchd environment. Then install newly generated
+   destination LaunchAgents, check permissions, and configure power/wake behavior.
+   Old plist paths and CLI binary hashes are not portable.
+5. Confirm one full scheduled completion, including all fourteen validated
+   analyses and publication readback. Use only one production scheduler during
+   cutover. Independent hosts do not share the local lock or request-budget
+   ledger, even when they use the same provider account.

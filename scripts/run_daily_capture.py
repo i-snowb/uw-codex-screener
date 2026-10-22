@@ -4,15 +4,19 @@
 from __future__ import annotations
 
 import argparse
+import faulthandler
 from datetime import datetime
 import fcntl
+import hashlib
 import json
 from pathlib import Path
+import signal
 import time
 from zoneinfo import ZoneInfo
 
 from morning_edge.benchmarks import BENCHMARKS
 from morning_edge.cli import live_morning_run
+from morning_edge.capture_checkpoint import context_files, load_checkpoint
 from morning_edge.clock import is_nyse_session
 from morning_edge.config import Settings, private_runtime_path
 from morning_edge.current_collection import CurrentDataset, collect_current
@@ -41,13 +45,16 @@ def plan(settings: Settings, now: datetime) -> dict:
             'network_called': False, 'recommendations_enabled': False}
 
 
-def capture(settings: Settings, *, now: datetime, output: Path, app_root: Path) -> dict:
+def capture(settings: Settings, *, now: datetime, output: Path, app_root: Path,
+            resume_from: Path | None = None) -> dict:
     result = plan(settings, now)
     status_path = app_root / 'data' / 'pipeline-status.json'
     def status(state: str, stage: str, reason: str, **extra: object) -> dict:
         value = result | {'status': state, 'stage': stage, 'reason': reason,
                           'updated_at': datetime.now(ET).isoformat(), **extra}
         write_morning_run(status_path, value)
+        print(json.dumps({"status": state, "stage": stage, "updated_at": value["updated_at"],
+            **{key: extra[key] for key in ("ticker", "dataset", "completed", "total") if key in extra}}, sort_keys=True), flush=True)
         return value
     if result['status'] == 'MARKET_CLOSED':
         return status('MARKET_CLOSED', 'calendar', 'No provider requests. Wait for the next NYSE session.')
@@ -66,37 +73,61 @@ def capture(settings: Settings, *, now: datetime, output: Path, app_root: Path) 
         started = time.perf_counter()
         stage = 'budget'
         try:
-            with WeeklyRequestBudget(settings.provider_usage_path, weekly_cap=40000,
-                    protected_reserve=7000, rolling_window=API_BASIC_ROLLING_WINDOW) as budget:
-                capacity = budget.usage().remaining_before_reserve
-                if capacity < result['maximum_transport_attempts']:
-                    return status('BLOCKED', stage, 'Insufficient local capacity above the protected reserve.', remaining_before_reserve=capacity)
-                stage = 'benchmarks'
-                status('RUNNING', stage, 'Refreshing five benchmark price series.')
-                with SnapshotStore(settings.database_path) as snapshots:
-                    client = UnusualWhalesClient(settings.provider_api_key, request_budget=budget)
-                    result['network_called'] = True
-                    report = collect_current(client=client, snapshots=snapshots, request_budget=budget,
-                        tickers=BENCHMARKS, datasets=(CurrentDataset.OHLC,), max_transport_attempts_per_item=3)
-                write_morning_run(output.with_name(output.stem + '-benchmarks.json'), report.to_dict())
-                if not report.preflight_passed or any(item.status.value != 'captured' for item in report.results):
-                    return status('FAILED', stage, 'Benchmark capture incomplete; base capture and publication skipped.')
-                benchmark_seconds = time.perf_counter() - started
-                stage = 'company_context'
-                company_started = time.perf_counter()
-                with SnapshotStore(settings.database_path) as snapshots:
-                    company_results = collect_company_context(client=client, snapshots=snapshots, tickers=settings.watchlist)
-                write_morning_run(output.with_name(output.stem + '-company-context.json'), {'results': company_results})
-                if any(row.get('collection_stopped') for row in company_results):
-                    return status('FAILED', stage, 'Company-context collection circuit opened; no further provider requests.')
-                company_seconds = time.perf_counter() - company_started
-            stage = 'capture_and_analysis'
-            status('RUNNING', stage, 'Capturing base and enhanced evidence under one cutoff.')
+            if resume_from:
+                stage = 'resume_verification'
+                status('RUNNING', stage, 'Verifying saved collection; no provider requests.')
+                _, _, context = load_checkpoint(resume_from, root=Path(__file__).resolve().parents[1],
+                    database=settings.database_path, tickers=tuple(settings.watchlist), datasets=tuple(CurrentDataset))
+                names = context_files(resume_from)
+                if set(context) != set(names):
+                    raise ValueError('daily resume requires benchmark and company-context receipts')
+                company_results = json.loads((resume_from.parent / names[1]).read_text())['results']
+                benchmark_seconds = company_seconds = 0.0
+                original = json.loads(resume_from.read_text())
+                result.update(observed_at=original['base']['generated_at'],
+                    source_cutoff_at=original['cutoff_at'], resume_started_at=now.isoformat(),
+                    resumed_collection=True)
+                context_directory = resume_from.parent
+            else:
+                with WeeklyRequestBudget(settings.provider_usage_path, weekly_cap=40000,
+                        protected_reserve=7000, rolling_window=API_BASIC_ROLLING_WINDOW) as budget:
+                    capacity = budget.usage().remaining_before_reserve
+                    if capacity < result['maximum_transport_attempts']:
+                        return status('BLOCKED', stage, 'Insufficient local capacity above the protected reserve.', remaining_before_reserve=capacity)
+                    stage = 'benchmarks'
+                    status('RUNNING', stage, 'Refreshing five benchmark price series.')
+                    with SnapshotStore(settings.database_path) as snapshots:
+                        client = UnusualWhalesClient(settings.provider_api_key, request_budget=budget)
+                        result['network_called'] = True
+                        report = collect_current(client=client, snapshots=snapshots, request_budget=budget,
+                            tickers=BENCHMARKS, datasets=(CurrentDataset.OHLC,), max_transport_attempts_per_item=3)
+                    write_morning_run(output.with_name(output.stem + '-benchmarks.json'), report.to_dict())
+                    if not report.preflight_passed or any(item.status.value != 'captured' for item in report.results):
+                        return status('FAILED', stage, 'Benchmark capture incomplete; base capture and publication skipped.')
+                    benchmark_seconds = time.perf_counter() - started
+                    stage = 'company_context'
+                    status('RUNNING', stage, 'Collecting company reference evidence.')
+                    company_started = time.perf_counter()
+                    with SnapshotStore(settings.database_path) as snapshots:
+                        company_results = collect_company_context(client=client, snapshots=snapshots, tickers=settings.watchlist)
+                    write_morning_run(output.with_name(output.stem + '-company-context.json'), {'results': company_results})
+                    if any(row.get('collection_stopped') for row in company_results):
+                        return status('FAILED', stage, 'Company-context collection circuit opened; no further provider requests.')
+                    company_seconds = time.perf_counter() - company_started
+                context_directory = output.parent
+                names = context_files(output.with_name(output.stem + '-collection.json'))
+            def progress(current_stage, detail):
+                nonlocal stage
+                stage = current_stage
+                status('RUNNING', stage, 'Processing cutoff-bound evidence.', **detail)
+            context = {name: hashlib.sha256((context_directory / name).read_bytes()).hexdigest() for name in names}
             captured = live_morning_run(settings, tickers=settings.watchlist, datasets=(), audit_accepted=True,
-                database_path=settings.database_path, output_path=output)
+                database_path=settings.database_path, output_path=output, resume_checkpoint=resume_from,
+                checkpoint_context=context, progress=progress)
             if captured['status'] != 'morning_run_complete':
                 return status('FAILED', stage, 'Base or enhanced collection failed. Inspect the private capture diagnostic.', capture=captured)
             stage = 'health'
+            status('RUNNING', stage, 'Checking source health; publication remains prohibited until validation.')
             run = json.loads(output.read_text())
             private = settings.database_path.parent / 'private'
             def optional_object(name):
@@ -126,21 +157,29 @@ def capture(settings: Settings, *, now: datetime, output: Path, app_root: Path) 
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Preserve the active Python stack when the supervisor terminates a timeout.
+    faulthandler.register(signal.SIGTERM, all_threads=True, chain=True)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--live', action='store_true')
     parser.add_argument('--audit-accepted', action='store_true')
     parser.add_argument('--env-file', type=Path, default=Path('.env'))
     parser.add_argument('--output', type=Path)
     parser.add_argument('--app-root', type=Path, default=Path('dashboard-app'))
+    parser.add_argument('--resume-capture', type=Path, help='Verified same-session collection checkpoint; no recapture.')
+    parser.add_argument('--expected-database', type=Path, help='Fail before collection if the runner and collector use different databases.')
     args = parser.parse_args(argv)
     if args.live != args.audit_accepted:
         parser.error('live capture requires both --live and --audit-accepted')
+    if args.resume_capture and not args.live:
+        parser.error('resume requires explicit --live --audit-accepted; it never calls a provider')
     _load_env(args.env_file)
     settings = Settings.from_env()
+    if args.expected_database and settings.database_path.resolve() != args.expected_database.resolve():
+        parser.error('collector database differs from the unattended runner database; correct the private configuration')
     now = datetime.now(ET)
     output = args.output or private_runtime_path('outputs/runs') / now.date().isoformat() / 'morning-run.json'
-    result = capture(settings, now=now, output=output, app_root=args.app_root) if args.live else plan(settings, now)
-    print(json.dumps(result, sort_keys=True))
+    result = capture(settings, now=now, output=output, app_root=args.app_root, resume_from=args.resume_capture) if args.live else plan(settings, now)
+    print(json.dumps(result, sort_keys=True), flush=True)
     return 2 if result['status'] in {'FAILED', 'BLOCKED'} else 0
 
 

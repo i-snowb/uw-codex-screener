@@ -220,7 +220,13 @@ class Runner:
         attempt = self.next_attempt("capture")
         output = attempt / "morning-run.json"
         command = [self.config["python"], str(ROOT / "scripts/run_daily_capture.py"), "--live", "--audit-accepted",
-                   "--env-file", str(ROOT / ".env"), "--output", str(output), "--app-root", str(ROOT / "dashboard-app")]
+                   "--env-file", str(ROOT / ".env"), "--output", str(output), "--app-root", str(ROOT / "dashboard-app"),
+                   "--expected-database", str(ROOT / "data/morning-edge.sqlite")]
+        for number in range(1, self.state["attempts"]["capture"]):
+            previous = self.directory / "attempts/capture" / str(number) / "morning-run-collection.json"
+            if previous.exists():
+                command += ["--resume-capture", str(previous)]
+                break
         environment = analyst_environment() | {"PYTHONPATH": str(ROOT / "src"), "PYTHONDONTWRITEBYTECODE": "1"}
         process = bounded_process(command, directory=attempt / "process", cwd=ROOT, timeout=self.remaining(1200), environment=environment)
         if process["exit_code"] or process["timed_out"] or not process["logs_within_limit"]:

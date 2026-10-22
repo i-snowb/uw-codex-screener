@@ -1,5 +1,5 @@
 {
-  "file_count": 146,
+  "file_count": 149,
   "files": [
     {
       "bytes": 464,
@@ -122,9 +122,9 @@
       "sha256": "6c463632f210d8a4b2f239a19b9e2d2b1eb25ef38954c245b61a7bc48ddf1757"
     },
     {
-      "bytes": 15878,
+      "bytes": 19962,
       "path": "docs/unattended-runner.md",
-      "sha256": "633bd9ef0a79988995cb9f44e2ba58ce117d653c3eade3c5f1467be9f277603a"
+      "sha256": "65fe8720c661dd3e9c3d4f9b94ec0b2b584ec723bfbe456c6db6f6d3bf7523db"
     },
     {
       "bytes": 7571,
@@ -237,9 +237,9 @@
       "sha256": "3eb459f451da39cff97e0d55ff998cda945122fb1236e642c5ad9094db0b9428"
     },
     {
-      "bytes": 9145,
+      "bytes": 12191,
       "path": "scripts/run_daily_capture.py",
-      "sha256": "373feec03bc2fcef8df53b63dd541bc95a86763f24625be9d9c488a9b2673107"
+      "sha256": "b2f0fa01e72afef46f39f6777c066945ab4c1174de7452b748031d1a37ee8faa"
     },
     {
       "bytes": 19220,
@@ -267,9 +267,9 @@
       "sha256": "61a521b549f39a3fbe05ad2a1d0b247c9050ebbc26bf6e7e1123ab94b4f94e9b"
     },
     {
-      "bytes": 32394,
+      "bytes": 32767,
       "path": "scripts/run_unattended_morning.py",
-      "sha256": "352d9fe88ed6cc4f4c5fb5c6502d11fe5406db4c58a9c22cf7aa2ac69ae3c70c"
+      "sha256": "c3852f7ee738c9267c31230078b8c289784a649a1f28e2786fea1394d396136d"
     },
     {
       "bytes": 2318,
@@ -317,14 +317,19 @@
       "sha256": "947a1793663bf1216871483e001699707d1a052e38f47c9a7caed298a0d91024"
     },
     {
+      "bytes": 7552,
+      "path": "src/morning_edge/capture_checkpoint.py",
+      "sha256": "53afa4a1eb97623d94b9ae76d78b93f12d6543f888366978b678dc6d7587da71"
+    },
+    {
       "bytes": 11689,
       "path": "src/morning_edge/challengers.py",
       "sha256": "9d73cb87a1d12ea04fff76b8c122c72a89aa90083000122b1be9735b7912ab27"
     },
     {
-      "bytes": 41536,
+      "bytes": 43454,
       "path": "src/morning_edge/cli.py",
-      "sha256": "a6cb84cfbe7089e8fa95cca44f768ad1d35cb0a2dedb6e3eb8021d0b42b4bea2"
+      "sha256": "a4590c8e678730e4d2e75facd45660921a99cb769af80f6bfc9bdf485a2b5d16"
     },
     {
       "bytes": 4936,
@@ -337,14 +342,14 @@
       "sha256": "fa8b51eefaa21872b43b0d6333af58af06bd12cae9b74ba117627b31542d41e6"
     },
     {
-      "bytes": 21544,
+      "bytes": 21790,
       "path": "src/morning_edge/current_collection.py",
-      "sha256": "67d0a49169d580fe01640e7140f69d831d8f0c0759de86f53d4e2e6c0435d640"
+      "sha256": "8a7d09385a01232ac78e25bda7f5d8bcc778d343bfa0f99a3ba431da5e3b12eb"
     },
     {
-      "bytes": 41403,
+      "bytes": 43354,
       "path": "src/morning_edge/daily.py",
-      "sha256": "df2bfd63e7fb70df85f1bad0da20e7215cebe66b223e62d46eca1249e5b9a67d"
+      "sha256": "76d490ddde4694f9b1bd4ffbaf1594d93d293e0e4bb18ec89e939b66c2911e96"
     },
     {
       "bytes": 12449,
@@ -352,14 +357,14 @@
       "sha256": "8ae31ff712c3824a8ab66e80f95095c91eb153bc7f72eb9c30a56b2d0f5a223d"
     },
     {
-      "bytes": 87038,
+      "bytes": 87154,
       "path": "src/morning_edge/edge.py",
-      "sha256": "11b036c7dc38426ad5315986205033b4942ebc42c4485698931027d285564f3b"
+      "sha256": "43bda1ac7032e570b46f255ac5723bc8fe03ab6e22c955ec24e310bdbcee0705"
     },
     {
-      "bytes": 19408,
+      "bytes": 19622,
       "path": "src/morning_edge/enhanced_collection.py",
-      "sha256": "25cdb5d2c51b7fa2b65fd4a817626be62e417cc0bc8f69b0c8d1cabb44726d7f"
+      "sha256": "3a7d1c2baee3e1a5d547d5f99677b670421c9226ec1ba764637e35ae9efdc1bb"
     },
     {
       "bytes": 21637,
@@ -427,9 +432,9 @@
       "sha256": "2d6a2ea314b6bcd3ec252da51b210c429f326e11f403b1636d45a79f431ee24f"
     },
     {
-      "bytes": 33281,
+      "bytes": 33712,
       "path": "src/morning_edge/normalization.py",
-      "sha256": "801c40c1a13a812532c363ecab19f9e3cf5d126754dd8d3f2b2e09e58391a72c"
+      "sha256": "752e03058f58e5c0b70e703805648b43948b62759542752c9f24d42c97a36d98"
     },
     {
       "bytes": 11099,
@@ -502,6 +507,11 @@
       "sha256": "5201fcc3e25bdbf66e5f3074d0beb70bd42cfe582082bf87e3ba6667d07a728b"
     },
     {
+      "bytes": 2494,
+      "path": "src/morning_edge/snapshot_archive.py",
+      "sha256": "a60ad58cf5b2437f2795eec2141e7f9a8997f714726589fab5537758f2f0d5e9"
+    },
+    {
       "bytes": 11665,
       "path": "src/morning_edge/store.py",
       "sha256": "185ce8ff83e1a7100e6c8562604bbd90c5e8e4972f939987c2bc64427893a0a5"
@@ -530,6 +540,11 @@
       "bytes": 8717,
       "path": "tests/test_budget.py",
       "sha256": "b816a57c381e69b3ce8c0fe5554febb844e40f51880706dfd18f27b5da0823c0"
+    },
+    {
+      "bytes": 13395,
+      "path": "tests/test_capture_reliability.py",
+      "sha256": "ed922eb66767d436e4c2d4f3ab3e682a18cdcd21a1f29f76b4f3e6febf35f68f"
     },
     {
       "bytes": 3135,

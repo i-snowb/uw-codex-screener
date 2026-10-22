@@ -304,6 +304,7 @@ def collect_current(
     datasets: Sequence[CurrentDataset | str] | None = None,
     max_transport_attempts_per_item: int = 3,
     generated_at: datetime | None = None,
+    progress: Callable[[dict], None] | None = None,
 ) -> CurrentCaptureReport:
     """Capture one bounded current response per requested ticker and dataset.
 
@@ -347,6 +348,9 @@ def collect_current(
     circuit = CollectionCircuit()
     for ticker in clean_tickers:
         for dataset in clean_datasets:
+            if progress:
+                progress({"ticker": ticker, "dataset": dataset.value,
+                    "completed": len(results), "total": len(clean_tickers) * len(clean_datasets)})
             spec = SPECS[dataset]
             endpoint = spec.endpoint.format(ticker=ticker)
             if circuit.reason:

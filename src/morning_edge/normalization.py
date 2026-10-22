@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 
 from .features import DailyBar, TrendFeatures, build_trend_features
 from .models import timestamp_from_text, timestamp_text, utc_timestamp
+from .snapshot_archive import ArchivePayloads, ArchiveSnapshot
 
 
 _GEX_FIELDS = ("call_wall", "put_wall", "gamma_flip", "gamma_magnet")
@@ -386,6 +387,24 @@ class _RawSnapshot:
     payload: Any
 
 
+@dataclass(frozen=True, slots=True)
+class _EvidenceSnapshot:
+    raw: ArchiveSnapshot
+
+    @property
+    def source(self) -> SourceRef:
+        return SourceRef(self.raw.snapshot_id, self.raw.dataset, self.raw.market_date,
+            timestamp_from_text(self.raw.as_of), timestamp_from_text(self.raw.retrieved_at))
+
+    @property
+    def metadata(self) -> Mapping[str, Any]:
+        return self.raw.metadata
+
+    @property
+    def payload(self) -> Any:
+        return self.raw.payload
+
+
 class EvidenceReader:
     """Read immutable SQLite evidence without making changes to the database."""
 
@@ -396,6 +415,7 @@ class EvidenceReader:
         # evidence until an external checkpoint occurs.
         self._connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         self._connection.row_factory = sqlite3.Row
+        self._payloads = ArchivePayloads(self._connection)
         self._bar_cache: dict[tuple[str, datetime, int], tuple[NormalizedBar, ...]] = {}
 
     def close(self) -> None:
@@ -407,30 +427,25 @@ class EvidenceReader:
     def __exit__(self, *_: object) -> None:
         self.close()
 
-    def _snapshots(self, ticker: str, dataset: str, cutoff_at: datetime) -> list[_RawSnapshot]:
+    def _snapshots(self, ticker: str, dataset: str, cutoff_at: datetime, *, latest_only: bool = False) -> list:
         cutoff = utc_timestamp(cutoff_at, field_name="cutoff_at")
         rows = self._connection.execute(
             """
-            SELECT s.id, s.dataset, s.as_of, s.retrieved_at, s.metadata_json, p.content_json
-            FROM snapshots AS s JOIN raw_payloads AS p ON p.content_hash=s.raw_payload_hash
+            SELECT s.id, s.dataset, s.as_of, s.retrieved_at, s.metadata_json, s.raw_payload_hash
+            FROM snapshots AS s
             WHERE s.symbol=? AND s.dataset=? AND s.as_of<=? AND s.retrieved_at<=?
             ORDER BY s.retrieved_at DESC, s.id DESC
-            """,
+            """ + (" LIMIT 1" if latest_only else ""),
             (ticker, dataset, timestamp_text(cutoff), timestamp_text(cutoff)),
         ).fetchall()
-        snapshots: list[_RawSnapshot] = []
+        snapshots = []
         for row in rows:
-            as_of = timestamp_from_text(row["as_of"])
             metadata = json.loads(row["metadata_json"])
-            payload = json.loads(row["content_json"])
-            snapshots.append(_RawSnapshot(
-                source=SourceRef(
-                    snapshot_id=int(row["id"]), dataset=row["dataset"],
-                    market_date=_provider_market_date(row["dataset"], metadata, payload, as_of), as_of=as_of,
-                    retrieved_at=timestamp_from_text(row["retrieved_at"]),
-                ),
-                metadata=metadata, payload=payload,
-            ))
+            snapshots.append(_EvidenceSnapshot(ArchiveSnapshot(
+                int(row["id"]), row["dataset"], row["as_of"], row["retrieved_at"], metadata,
+                row["raw_payload_hash"], self._payloads,
+                lambda meta, payload, as_of, kind: _provider_market_date(kind, meta, payload, timestamp_from_text(as_of)),
+            )))
         return snapshots
 
     @staticmethod
@@ -546,7 +561,7 @@ class EvidenceReader:
         return [chosen[key] for key in sorted(chosen, key=lambda value: (value[0], str(value[1])))]
 
     def _latest_snapshot(self, ticker: str, dataset: str, cutoff_at: datetime) -> _RawSnapshot | None:
-        snapshots = self._snapshots(ticker, dataset, cutoff_at)
+        snapshots = self._snapshots(ticker, dataset, cutoff_at, latest_only=True)
         return snapshots[0] if snapshots else None
 
     def flow_evidence(self, ticker: str, *, cutoff_at: datetime) -> FlowEvidence:
