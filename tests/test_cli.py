@@ -145,7 +145,7 @@ class CliTest(unittest.TestCase):
         self.assertFalse(result["network_called"])
         self.assertFalse(result["recommendations_enabled"])
         self.assertEqual(8, result["logical_items"])
-        self.assertEqual(24, result["maximum_transport_attempts"])
+        self.assertEqual(171, result["maximum_transport_attempts"])
 
     def test_current_capture_live_requires_audit_acknowledgement(self) -> None:
         settings = Settings.from_env({

@@ -441,6 +441,10 @@ class EvidenceReader:
         snapshots = []
         for row in rows:
             metadata = json.loads(row["metadata_json"])
+            if dataset == 'option_chain':
+                from .option_chain_collection import incomplete_chain
+                if incomplete_chain(metadata):
+                    continue
             snapshots.append(_EvidenceSnapshot(ArchiveSnapshot(
                 int(row["id"]), row["dataset"], row["as_of"], row["retrieved_at"], metadata,
                 row["raw_payload_hash"], self._payloads,

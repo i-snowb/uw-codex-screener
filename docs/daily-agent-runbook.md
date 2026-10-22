@@ -19,10 +19,10 @@ Successful base and enhanced captures use one shared end-of-capture cutoff.
   requirement plus the protected reserve.
 - Use the current ET date for the run directory.
 - Do not reuse an analyst batch from a different run or date.
-- Run the network-free plan before collection. The approved 334-request plan
-  includes 14 company-context calls and at most 1,002 transport attempts per
-  capture. The saved schedule must use the same bound; it must not silently
-  widen when datasets are added.
+- Run the network-free plan before collection. The 334-item plan includes 14
+  company-context calls. Complete option chains can require up to 50 pages each;
+  the current worst-case bound is 3,060 transport attempts, including retries.
+  Preserve the same protected reserve. Recheck the bound when datasets change.
 - Check today's `outputs/unattended/YYYY-MM-DD/state.json` before a chat-driven
   run. Do not start a second collector while a headless run is active, and do
   not repeat a completed, integrity-verified run.
@@ -37,8 +37,8 @@ Successful base and enhanced captures use one shared end-of-capture cutoff.
    writes a source-linked `*-enhanced.json` sidecar. Use standalone
    `enhanced-capture` only for selective refreshes. Store all artifacts under
    `outputs/runs/YYYY-MM-DD/` under the configured private runtime root.
-   The default 14-ticker plan is 334 logical requests and at most 1,002 transport
-   attempts. Preserve the 7,000 reserve. It refuses an existing output path;
+   The default 14-ticker plan is 334 collection items and at most 3,060 transport
+   attempts with complete chain pagination. Preserve the 7,000 reserve. It refuses an existing output path;
    use a new attempt filename for recovery. It records last-attempt stage and
    diagnostics in `dashboard-app/data/pipeline-status.json`. A
    `BLOCKED` or `FAILED` result must not be published. Success here means

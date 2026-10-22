@@ -68,7 +68,7 @@ class CollectionFailureTests(unittest.TestCase):
                 root = Path(temporary)
                 client = Mock()
                 client.option_chain.side_effect = error
-                with SnapshotStore(root / "source.sqlite") as store, WeeklyRequestBudget(root / "usage.sqlite", weekly_cap=100, protected_reserve=0) as budget:
+                with SnapshotStore(root / "source.sqlite") as store, WeeklyRequestBudget(root / "usage.sqlite", weekly_cap=2000, protected_reserve=0) as budget:
                     report = collect_current(client=client, snapshots=store, request_budget=budget,
                         tickers=[f"T{index}" for index in range(8)], datasets=[CurrentDataset.OPTION_CHAIN], generated_at=NOW)
                     self.assertEqual(expected, client.option_chain.call_count)

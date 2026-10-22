@@ -23,6 +23,7 @@ from .providers.unusual_whales import (
     gex_unusable_level_names,
 )
 from .store import SnapshotStore
+from .option_chain_collection import capture_chain, VERSION as CHAIN_VERSION, MAX_PAGES as CHAIN_MAX_PAGES
 
 
 class CoverageState(StrEnum):
@@ -46,14 +47,8 @@ class BackfillDataset:
 
 
 # These are endpoint families, not claims about the shape of individual rows.
-# The option-chain endpoint is exceptional: its documented historical ``date``
-# parameter and full-chain ``greeks=true`` response were confirmed in live
-# probes at current, 30-, 60-, and 90-day scopes, and it exposes no pagination
-# parameter. Each non-empty historical response is also checked against the
-# requested date using every row's ``last_tape_time`` before it is marked
-# complete.
-# Other paginated families remain deliberately incomplete until separately
-# verified.
+# Enriched chains require numbered pages. Legacy one-response captures must not
+# be reused as complete chains. Last-trade times may precede the requested day.
 BACKFILL_DATASETS: dict[str, BackfillDataset] = {
     "ohlc": BackfillDataset(
         "ohlc", Dataset.OHLC, daily=False, pagination_verified=True,
@@ -139,6 +134,7 @@ class BackfillPlan:
             "calendar_rule": "weekday_only; exchange holidays remain explicit provider coverage states",
             "schema_policy": "raw_response_only; no field mapping or derived analytics",
             "dataset_parameters": {
+                "option_chain": {"coverage_version": CHAIN_VERSION, "page_limit": 500},
                 "ohlc": {
                     "timeframe": "2Y",
                     "limit": 2500,
@@ -311,9 +307,10 @@ class BackfillStore:
                  AND s.symbol = ?
                  AND json_extract(s.metadata_json, '$.requested_market_date') = ?
                  AND e.state IN ('collected', 'empty')
+                 AND (? != 'option_chain' OR json_extract(s.metadata_json, '$.chain_coverage_version') = ?)
                ORDER BY e.id DESC
                LIMIT 1""",
-            (dataset, item.ticker, item.requested_date.isoformat()),
+            (dataset, item.ticker, item.requested_date.isoformat(), dataset, CHAIN_VERSION),
         ).fetchone()
         if row is None or row["snapshot_id"] is None:
             return None
@@ -1218,6 +1215,34 @@ def collect(
                 },
             )
             states[item.item_key] = prior_state
+            continue
+        if item.dataset == 'option_chain':
+            if attempted >= max_requests:
+                break
+            called = [0]
+            try:
+                chain = capture_chain(client=client, snapshots=snapshots, ticker=item.ticker,
+                    requested_date=item.requested_date, max_pages=min(CHAIN_MAX_PAGES, max_requests-attempted),
+                    progress=lambda page: called.__setitem__(0, page + 1),
+                    metadata={'capture_mode': 'historical_chain', 'requested_market_date': item.requested_date.isoformat(),
+                        'backfill_plan_id': item.plan_id, 'backfill_item_key': item.item_key,
+                        'historical_scope_verified': True,
+                        'historical_scope_status': 'verified_requested_date_and_complete_pages',
+                        'as_of_source': 'requested_market_date; complete ordered pages; last trade may be older, never a quote timestamp'})
+                attempted += chain.requests
+                state = (CoverageState.COLLECTED if chain.row_count else CoverageState.EMPTY) if chain.complete else CoverageState.BUDGET_EXHAUSTED
+                event_store.record(item, state, snapshot_id=chain.snapshot.id, details={
+                    'pagination_family': CHAIN_VERSION, 'pages_captured': chain.requests,
+                    'row_count': chain.row_count, 'complete': chain.complete})
+                collected += int(chain.complete and bool(chain.row_count))
+                empty += int(chain.complete and not chain.row_count)
+            except Exception as error:
+                attempted += called[0]
+                invalid = isinstance(error, ValueError)
+                failures += int(not invalid)
+                event_store.record(item, CoverageState.SCOPE_UNVERIFIED if invalid else CoverageState.FAILED,
+                    snapshot_id=getattr(error, 'snapshot_id', None),
+                    details={'error_type': type(error).__name__, 'scope_validation_error': str(error)[:160] if invalid else None})
             continue
         if item.dataset == "flow_alerts":
             flow_result = _collect_flow_alert_pages(

@@ -17,6 +17,10 @@ reviewed 2026-08-20:
   — `GET /api/stock/{ticker}/option-chains`; `greeks=true` returns enriched
   contract rows including strike, expiry, type, NBBO, IV, OI, volume, Greeks, and
   `last_tape_time`.
+  The current reference, rechecked 2026-10-22, specifies numbered pages of up to
+  500 enriched contracts. Follow pages to a short terminal page. A one-page
+  500-row response does not establish full-chain coverage. The separate default
+  symbol inventory can cross-check contract membership.
 - [Option trades](https://api.unusualwhales.com/docs/operations/PublicApi.OptionTradeController.index)
   and [flow alerts](https://api.unusualwhales.com/docs/operations/PublicApi.OptionTradeController.flow_alerts)
   — underlying trade timestamps (`executed_at`) and aggregated alert timestamps

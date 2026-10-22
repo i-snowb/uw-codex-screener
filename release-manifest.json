@@ -1,5 +1,5 @@
 {
-  "file_count": 149,
+  "file_count": 151,
   "files": [
     {
       "bytes": 464,
@@ -72,9 +72,9 @@
       "sha256": "d9500940e0f5a2d5a57c0f991fae247788b8f8c97ee15eb3fe8c106c78d69ac6"
     },
     {
-      "bytes": 13082,
+      "bytes": 13166,
       "path": "docs/daily-agent-runbook.md",
-      "sha256": "ff30b55c05c737943889c4d9464e16d7bdf9261edfe6deec6bc7cdf7da25c98a"
+      "sha256": "0408f6f72f2193a69ea0ae4235863ed45d0d9f317195ef2696db304581c5dfa1"
     },
     {
       "bytes": 6289,
@@ -87,9 +87,9 @@
       "sha256": "f5b749123e303a5bfd530e34d9ab8f347c8b1c6785764e765750f76e48ff0801"
     },
     {
-      "bytes": 5989,
+      "bytes": 6343,
       "path": "docs/historical-backfill.md",
-      "sha256": "d731a007fc8baa210b5489725955c8a0da8e7ed68c95c94f4b1ffef6f19ead2e"
+      "sha256": "2dba5e9f186ae8ceb9c0494fcfe0855028ff0273cfe1f658061561246b504f69"
     },
     {
       "bytes": 2992,
@@ -127,9 +127,9 @@
       "sha256": "65fe8720c661dd3e9c3d4f9b94ec0b2b584ec723bfbe456c6db6f6d3bf7523db"
     },
     {
-      "bytes": 7571,
+      "bytes": 7864,
       "path": "docs/unusual-whales-endpoint-audit.md",
-      "sha256": "0f0f78c51b83c32e6eb52caf01f7938eb71b4cb4cff0701319ff1985e71bf79b"
+      "sha256": "fc7632fec40a7991933ff0c89e6c36d62d382f7fa99fa67ee98e92d8f21382cf"
     },
     {
       "bytes": 797,
@@ -237,9 +237,9 @@
       "sha256": "3eb459f451da39cff97e0d55ff998cda945122fb1236e642c5ad9094db0b9428"
     },
     {
-      "bytes": 12191,
+      "bytes": 12310,
       "path": "scripts/run_daily_capture.py",
-      "sha256": "b2f0fa01e72afef46f39f6777c066945ab4c1174de7452b748031d1a37ee8faa"
+      "sha256": "033a728bd8629b9d5ce021faa95a9e7184e129efe2090ea8bfb4730bccbc61ea"
     },
     {
       "bytes": 19220,
@@ -307,9 +307,9 @@
       "sha256": "09ac40da3c74c560672d299a40f9aff19ecfc1f5a1942c0a53f5989e7496bb12"
     },
     {
-      "bytes": 63979,
+      "bytes": 66032,
       "path": "src/morning_edge/backfill.py",
-      "sha256": "f356b7ed59743f2c49eb23991fc2ea4b4625fd682253f8e12dc3e6b51612993d"
+      "sha256": "330d10ff673f6a7f4e26f1127a3930025117dbcb7769e5bb964c9194fa8e45a1"
     },
     {
       "bytes": 1570,
@@ -317,9 +317,9 @@
       "sha256": "947a1793663bf1216871483e001699707d1a052e38f47c9a7caed298a0d91024"
     },
     {
-      "bytes": 7552,
+      "bytes": 7767,
       "path": "src/morning_edge/capture_checkpoint.py",
-      "sha256": "53afa4a1eb97623d94b9ae76d78b93f12d6543f888366978b678dc6d7587da71"
+      "sha256": "73208698e956874a70fd93ed3df08e481d7b0c349c01648f28237e2406ff9cd6"
     },
     {
       "bytes": 11689,
@@ -327,9 +327,9 @@
       "sha256": "9d73cb87a1d12ea04fff76b8c122c72a89aa90083000122b1be9735b7912ab27"
     },
     {
-      "bytes": 43454,
+      "bytes": 43616,
       "path": "src/morning_edge/cli.py",
-      "sha256": "a4590c8e678730e4d2e75facd45660921a99cb769af80f6bfc9bdf485a2b5d16"
+      "sha256": "342a0b1bd949414841a7364ac2240f4b8f17a651eb3cfa2d851813d7e7048c34"
     },
     {
       "bytes": 4936,
@@ -342,14 +342,14 @@
       "sha256": "fa8b51eefaa21872b43b0d6333af58af06bd12cae9b74ba117627b31542d41e6"
     },
     {
-      "bytes": 21790,
+      "bytes": 23150,
       "path": "src/morning_edge/current_collection.py",
-      "sha256": "8a7d09385a01232ac78e25bda7f5d8bcc778d343bfa0f99a3ba431da5e3b12eb"
+      "sha256": "6a0658126a0ce49dc8a4fc36b8142604278ddfc45cdd52e573f1520649da4f65"
     },
     {
-      "bytes": 43354,
+      "bytes": 43630,
       "path": "src/morning_edge/daily.py",
-      "sha256": "76d490ddde4694f9b1bd4ffbaf1594d93d293e0e4bb18ec89e939b66c2911e96"
+      "sha256": "bbcdc1581cf7bbcbbcd158432386d08b8b2b417c28953ffd0926d30efb274791"
     },
     {
       "bytes": 12449,
@@ -357,9 +357,9 @@
       "sha256": "8ae31ff712c3824a8ab66e80f95095c91eb153bc7f72eb9c30a56b2d0f5a223d"
     },
     {
-      "bytes": 87154,
+      "bytes": 87541,
       "path": "src/morning_edge/edge.py",
-      "sha256": "43bda1ac7032e570b46f255ac5723bc8fe03ab6e22c955ec24e310bdbcee0705"
+      "sha256": "50864e6e617679a2bd516ffeebb4d65136311f39f9fea891f622503fd4dfa35f"
     },
     {
       "bytes": 19622,
@@ -432,14 +432,19 @@
       "sha256": "2d6a2ea314b6bcd3ec252da51b210c429f326e11f403b1636d45a79f431ee24f"
     },
     {
-      "bytes": 33712,
+      "bytes": 33900,
       "path": "src/morning_edge/normalization.py",
-      "sha256": "752e03058f58e5c0b70e703805648b43948b62759542752c9f24d42c97a36d98"
+      "sha256": "a95c43475d5f5c5cba96ebf1b732b5631866bb0d978123f6c245d53d9f0e4555"
     },
     {
-      "bytes": 11099,
+      "bytes": 11223,
       "path": "src/morning_edge/operational_context.py",
-      "sha256": "8bb8e623436569fb75934adf450ecca51f55c352534e1b4e000d6ecaea4bf526"
+      "sha256": "287667bbc915816c787f196eb1c6cbfc0e85196b2c6d6c27ddd5faf49c367829"
+    },
+    {
+      "bytes": 7746,
+      "path": "src/morning_edge/option_chain_collection.py",
+      "sha256": "ed719f3c7804eea27ef8bded427ab723a197f9bfa44cea84f92f73ea960d2072"
     },
     {
       "bytes": 5619,
@@ -477,9 +482,9 @@
       "sha256": "5f801cc08e1477ad1f8a6bdf0a5079e06e3781df25cab6b40cb1453696a84ce6"
     },
     {
-      "bytes": 34169,
+      "bytes": 34999,
       "path": "src/morning_edge/providers/unusual_whales.py",
-      "sha256": "9f6bb9c4a79c5a13924fe82162634f154fb17a038296cf659832042a41584061"
+      "sha256": "f68d00067f96dac9dbde7cfc689a7d23490f12c3680a26c56b9e67f5c3b955c1"
     },
     {
       "bytes": 9616,
@@ -507,9 +512,9 @@
       "sha256": "5201fcc3e25bdbf66e5f3074d0beb70bd42cfe582082bf87e3ba6667d07a728b"
     },
     {
-      "bytes": 2494,
+      "bytes": 2700,
       "path": "src/morning_edge/snapshot_archive.py",
-      "sha256": "a60ad58cf5b2437f2795eec2141e7f9a8997f714726589fab5537758f2f0d5e9"
+      "sha256": "9ad3fc16c6bfa665173c1dc54ac836fd85eb62d88c0caa92afbd9bb8e801e499"
     },
     {
       "bytes": 11665,
@@ -527,14 +532,14 @@
       "sha256": "8dc69379979de57cfbd090c84e790f522fd3a90de226d9766fa2da6959b8be46"
     },
     {
-      "bytes": 17336,
+      "bytes": 17337,
       "path": "tests/test_assessment_regressions.py",
-      "sha256": "add76420806da523fa5df29dc4bb7a10acd41fb3a6426d25fab29c8caa7852ca"
+      "sha256": "e8eb48146ae80ceedb4941d566808f0131e44306867e995742785e8635caac4d"
     },
     {
-      "bytes": 31216,
+      "bytes": 31235,
       "path": "tests/test_backfill.py",
-      "sha256": "4a9b53980de904fa2c88ad0f2ef05b84309a5e3e44fc100566450388ce060328"
+      "sha256": "3973a4c1d2e920aab7a5bbc91aea0c5e20e297f810b79fa73fc9c0145440d830"
     },
     {
       "bytes": 8717,
@@ -552,9 +557,9 @@
       "sha256": "455c74815c9e762352ec5f80ca24e82cc30230f20db7200ece8e6171646f14b2"
     },
     {
-      "bytes": 10145,
+      "bytes": 10146,
       "path": "tests/test_cli.py",
-      "sha256": "c42e8e4f5217cbadc9582e87316269ea841da30b9c62b253d1e5dc824a40de68"
+      "sha256": "6bd5d5ce64ab168fb4f896f3febd4dfda81060fb391b601d55b678ad920d4912"
     },
     {
       "bytes": 2492,
@@ -567,9 +572,9 @@
       "sha256": "e6704e25d8bf9bfcc87f5225f613990c3bccc24c02df207312cf8cc8521f931b"
     },
     {
-      "bytes": 12552,
+      "bytes": 12554,
       "path": "tests/test_current_collection.py",
-      "sha256": "0b6637277a83587e127a4c31c75d5f5011ea563abe9dee991d24e977adbd4a24"
+      "sha256": "27a8b10a7e5185721cb6c975d71c7bababdd3c87151f86c17434e813c8994b3d"
     },
     {
       "bytes": 10395,
@@ -672,6 +677,11 @@
       "sha256": "0ae3c3d7fa20cd3c358d49b1d7129ae0183d4f4412e608a1277dc64defe71ba0"
     },
     {
+      "bytes": 5417,
+      "path": "tests/test_option_chain_pagination.py",
+      "sha256": "8e0ff510a60285f6913f74626a3ea8676cba7efea424657052c93d2ffe9fe698"
+    },
+    {
       "bytes": 1427,
       "path": "tests/test_option_research.py",
       "sha256": "3dacd226e8c282118de159d295a1cd6f27c0d6a1ade22dae87b5d262c21d85c7"
@@ -699,7 +709,7 @@
     {
       "bytes": 14510,
       "path": "tests/test_readiness_repairs.py",
-      "sha256": "81d6631ad5cc621710da77aa6cdc8de6ac40774a5a2c10ac8d5fe7b6ec940b16"
+      "sha256": "08def1224fad6ebe5153a473656addbd1aac49663d10b1d89792028645ab293d"
     },
     {
       "bytes": 7643,
@@ -742,9 +752,9 @@
       "sha256": "e7b6582d405676ef567cc2e7b19fa9d854cb008b2899d0a8f2276699b6b2b6c5"
     },
     {
-      "bytes": 24483,
+      "bytes": 25460,
       "path": "tests/test_unusual_whales.py",
-      "sha256": "a13786b2abac6503c0c35e4a1c06eb141dcd8b6d5e3b58e9a882fd19cb259b32"
+      "sha256": "3a8b9933465730a0df6e1272b4bb680650aa6deeb21b1d8868f7a051331d9719"
     }
   ],
   "private_runtime_paths_included": false,

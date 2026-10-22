@@ -348,6 +348,23 @@ class UnusualWhalesAdapterTests(unittest.TestCase):
         self.assertEqual(["true"], parse_qs(urlparse(request_url).query)["greeks"])
         self.assertEqual("QCOM260117C00180000", result.data[0]["option_symbol"])
 
+    def test_chain_numbered_page_and_symbol_inventory(self) -> None:
+        transport = ScriptedTransport([(200, {}, {'data': []}), (200, {}, {'data': ['QCOM261120C00180000']})])
+        client = UnusualWhalesClient('test-key',transport=transport)
+        client.option_chain('QCOM',page=2,limit=250)
+        query=parse_qs(urlparse(transport.requests[0][0]).query)
+        self.assertEqual(['2'],query['page'])
+        self.assertEqual(['250'],query['limit'])
+        self.assertEqual(['QCOM261120C00180000'],client.option_chain('QCOM',greeks=False).data)
+
+    def test_chain_invalid_paging_is_rejected_before_transport(self) -> None:
+        transport = ScriptedTransport([])
+        client = UnusualWhalesClient('test-key',transport=transport)
+        for kwargs in ({'page':-1},{'page':True},{'limit':501},{'limit':1.5}):
+            with self.assertRaises(ValueError):
+                client.option_chain('QCOM',**kwargs)
+        self.assertEqual([],transport.requests)
+
     def test_flow_alert_query_preserves_bounded_history_parameters(self) -> None:
         transport = RoutingTransport()
         client = UnusualWhalesClient("test-key", transport=transport)

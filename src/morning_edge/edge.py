@@ -167,6 +167,10 @@ class EdgeAnalyzer:
         result: list[RawSnapshot] = []
         for row in rows:
             metadata = json.loads(row["metadata_json"])
+            if dataset == 'option_chain':
+                from .option_chain_collection import incomplete_chain
+                if incomplete_chain(metadata):
+                    continue
             result.append(
                 ArchiveSnapshot(
                     int(row["id"]), row["dataset"], row["as_of"], row["retrieved_at"],
@@ -312,6 +316,8 @@ class EdgeAnalyzer:
             "history": history,
             "source_snapshot_ids": [item.snapshot_id for item in snapshots],
             "method": "ATM call/put IV by expiry; 25-delta skew and liquidity from stored full chains",
+            "chain_coverage_version": latest_snapshot.metadata.get('chain_coverage_version'),
+            "pagination_status": latest_snapshot.metadata.get('pagination_status', 'LEGACY_UNVERIFIED'),
         })
         return latest
 

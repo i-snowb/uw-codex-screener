@@ -136,7 +136,8 @@ def attach_operational_context(run, *, snapshots, company_results, calendar=None
                 chain_sources.append(stored)
         if len(chain_sources) == 1:
             stored = chain_sources[0]
-            rows = stored.envelope.payload['data']
+            from .option_chain_collection import expand_chain
+            rows = expand_chain(snapshots.connection, stored.envelope.metadata, stored.envelope.payload)['data']
             checks['chain_identity'][ticker] = chain_identity_diagnostic(rows, ticker) | {'source_snapshot_id': stored.id}
             reference = (entry.get('trade_thesis') or {}).get('option_reference')
             expected = reference.get('contract') if isinstance(reference, dict) else None

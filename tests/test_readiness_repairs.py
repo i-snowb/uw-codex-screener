@@ -208,7 +208,7 @@ class OperationalRepairs(unittest.TestCase):
             self.assertEqual('MARKET_CLOSED', result['status']); provider.assert_not_called()
             self.assertFalse((Path(tmp)/'run.json').exists())
         self.assertEqual(334, gateway.plan(settings, NOW)['logical_requests'])
-        self.assertEqual(1002, gateway.plan(settings, NOW)['maximum_transport_attempts'])
+        self.assertEqual(3060, gateway.plan(settings, NOW)['maximum_transport_attempts'])
 
     def test_local_publication_has_immutable_hashed_detail_and_replay(self):
         run = {'run_id': '2026-09-08-test', 'cutoff_at': NOW.isoformat(), 'watchlist': [{'ticker': 'QCOM', 'technical': {'bars': [{'date': '2026-09-04', 'close': 100}]}}]}

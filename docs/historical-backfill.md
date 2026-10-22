@@ -69,13 +69,17 @@ are immutable in `snapshots`; manifests and events are also append-only.
 
 ## Initial collections
 
-Use `ohlc`, `earnings`, and `option_chain` first. They produce one raw response
-per ticker or requested date and are bounded. The active option-chain endpoint
-supports a historical `date`, returns the enriched full chain with
-`greeks=true`, and exposes no pagination, limit, or cursor parameter. Live
-probes confirmed its requested scope at the current date and 30, 60, and 90
-days earlier. Accordingly, after adapter date validation, a non-empty
-option-chain response is `collected`.
+Use `ohlc`, `earnings`, and `option_chain` first. OHLC and earnings are bounded
+responses. Enriched option chains require `limit=500` and numbered `page`
+requests. Collection follows at most 50 pages and requires a short terminal
+page, unique contract identities, and stable expiry/strike/symbol ordering.
+Every provider page remains unchanged in the raw archive. The terminal record
+references earlier page IDs and hashes; readers assemble a view without
+rewriting raw responses. Partial groups and legacy one-page backfills are not
+eligible as full-chain evidence. A historical last-trade timestamp can precede
+the requested session; it is not a quote timestamp. Timestamps after the
+requested date fail closed. Old incomplete chains remain preserved and must be
+recollected under `option-chain-pages-v1` before complete-chain analysis.
 
 The OHLC backfill requests a `2Y` window with the provider's 2,500-row limit.
 This matches the API Basic historical entitlement and yields about 500 regular

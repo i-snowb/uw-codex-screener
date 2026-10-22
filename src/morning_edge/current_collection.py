@@ -27,6 +27,7 @@ from .providers.unusual_whales import (
     gex_unusable_level_names,
 )
 from .store import SnapshotStore
+from .option_chain_collection import capture_chain, MAX_PAGES
 
 
 class CurrentDataset(StrEnum):
@@ -306,7 +307,7 @@ def collect_current(
     generated_at: datetime | None = None,
     progress: Callable[[dict], None] | None = None,
 ) -> CurrentCaptureReport:
-    """Capture one bounded current response per requested ticker and dataset.
+    """Capture bounded responses, including complete paginated option chains.
 
     Preflight uses the same local budget that the real client consumes per HTTP
     attempt.  It reserves enough capacity for the worst-case retry count before
@@ -325,7 +326,8 @@ def collect_current(
     now = (generated_at or datetime.now(UTC)).astimezone(UTC)
     if generated_at is not None and (generated_at.tzinfo is None or generated_at.utcoffset() is None):
         raise ValueError("generated_at must be timezone-aware")
-    max_attempts = len(clean_tickers) * len(clean_datasets) * max_transport_attempts_per_item
+    page_bound = len(clean_datasets) + (MAX_PAGES - 1 if CurrentDataset.OPTION_CHAIN in clean_datasets else 0)
+    max_attempts = len(clean_tickers) * page_bound * max_transport_attempts_per_item
     usage = request_budget.usage(now=now)
     if max_attempts > usage.remaining_before_reserve:
         blocked = tuple(
@@ -360,6 +362,20 @@ def collect_current(
                 ))
                 continue
             try:
+                if dataset is CurrentDataset.OPTION_CHAIN:
+                    chain = capture_chain(client=client, snapshots=snapshots, ticker=ticker,
+                        metadata={'capture_mode': 'current', 'as_of_source': spec.as_of_source,
+                                  'current_vs_prior_session': spec.timestamp_semantics},
+                        progress=(lambda page: progress({'ticker': ticker, 'dataset': dataset.value,
+                            'completed': len(results), 'total': len(clean_tickers) * len(clean_datasets),
+                            'chain_page': page})) if progress else None)
+                    source = chain.snapshot.envelope
+                    state = (CurrentCaptureStatus.CAPTURED if chain.row_count else CurrentCaptureStatus.EMPTY) if chain.complete else CurrentCaptureStatus.PARTIAL
+                    results.append(CurrentCaptureItem(ticker, dataset, state, endpoint,
+                        chain.snapshot.id, source.retrieved_at.isoformat(), chain.row_count,
+                        None if chain.complete else 'option-chain page guard reached; incomplete chain excluded'))
+                    circuit.success()
+                    continue
                 response = spec.collect(client, ticker)
                 circuit.success()
                 status, reason = _item_status(dataset, response)

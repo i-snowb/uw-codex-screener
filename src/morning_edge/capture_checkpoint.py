@@ -50,6 +50,9 @@ def _manifest(database: Path, base: CurrentCaptureReport, extra: EnhancedCapture
             actual_hash = hashlib.sha256(row["content_json"].encode()).hexdigest()
             if actual_hash != row["raw_payload_hash"]:
                 raise ValueError("checkpoint raw payload hash mismatch")
+            if row['dataset'] == 'option_chain':
+                from .option_chain_collection import expand_chain
+                expand_chain(connection, meta, json.loads(row['content_json']), verify_hashes=True)
             values.append({"id": row["id"], "identity": row["idempotency_key"],
                 "payload_sha256": actual_hash,
                 "metadata_sha256": hashlib.sha256(row["metadata_json"].encode()).hexdigest()})

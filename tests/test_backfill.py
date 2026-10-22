@@ -38,7 +38,7 @@ class FakeHistoricalClient:
         self.calls.append(("option_chain", as_of.isoformat()))
         return response(
             f"/api/stock/{ticker}/option-chains",
-            [{"raw": True, "last_tape_time": f"{as_of.isoformat()}T21:45:00Z"}],
+            [{"raw": True, "option_symbol": "QCOM260918C00180000", "last_tape_time": f"{as_of.isoformat()}T21:45:00Z"}],
         )
 
     def oi_change(self, ticker: str, *, as_of: date, limit: int = 500, page: int | None = None, order: str = "desc") -> EndpointResponse:
@@ -210,13 +210,12 @@ class BackfillTests(unittest.TestCase):
         self.assertEqual(0, result["state_counts"][CoverageState.SCOPE_UNVERIFIED.value])
         stored = self.store.list(symbol="QCOM", dataset=Dataset.OPTION_CHAIN.value)[0]
         self.assertEqual(
-            "requested_market_date_at_utc_midnight; response last_tape_time dates validated; "
-            "historical scope confirmed by live probe; contract timestamps otherwise unnormalized",
+            "requested_market_date; complete ordered pages; last trade may be older, never a quote timestamp",
             stored.envelope.metadata["as_of_source"],
         )
         self.assertTrue(stored.envelope.metadata["raw_only"])
-        self.assertEqual("verified_not_required", stored.envelope.metadata["pagination_status"])
-        self.assertEqual("verified_option_chain_date_scope", stored.envelope.metadata["historical_scope_status"])
+        self.assertEqual("complete", stored.envelope.metadata["pagination_status"])
+        self.assertEqual("verified_requested_date_and_complete_pages", stored.envelope.metadata["historical_scope_status"])
 
     def test_reuses_terminal_evidence_across_overlapping_plans(self) -> None:
         first = make_plan(
@@ -296,7 +295,7 @@ class BackfillTests(unittest.TestCase):
             def option_chain(self, ticker: str, *, as_of: date, greeks: bool = True) -> EndpointResponse:
                 return response(
                     f"/api/stock/{ticker}/option-chains",
-                    [{"raw": True, "last_tape_time": "2026-08-20T21:45:00Z"}],
+                    [{"raw": True, "option_symbol": "QCOM260918C00180000", "last_tape_time": "2026-08-22T21:45:00Z"}],
                 )
 
         plan = make_plan(
@@ -311,10 +310,8 @@ class BackfillTests(unittest.TestCase):
         self.assertEqual(1, self.store.count())
         self.assertEqual(1, result["state_counts"][CoverageState.SCOPE_UNVERIFIED.value])
         stored = self.store.list(symbol="QCOM", dataset=Dataset.OPTION_CHAIN.value)[0]
-        self.assertEqual(
-            "option_chain_date_scope_mismatch",
-            stored.envelope.metadata["historical_scope_status"],
-        )
+        self.assertEqual('invalid', stored.envelope.metadata['pagination_status'])
+        self.assertIn('after requested date', stored.envelope.metadata['validation_error'])
 
     def test_resume_does_not_repeat_terminal_option_chain_capture(self) -> None:
         plan = make_plan(

@@ -322,7 +322,9 @@ def current_capture(
     )
     selected = tuple(CurrentDataset(item) for item in datasets) if datasets else tuple(CurrentDataset)
     planned_items = len(symbols) * len(selected)
-    maximum_transport_attempts = planned_items * MAX_TRANSPORT_ATTEMPTS_PER_LOGICAL_ITEM
+    from .option_chain_collection import MAX_PAGES
+    page_bound = planned_items + (len(symbols) * (MAX_PAGES-1) if CurrentDataset.OPTION_CHAIN in selected else 0)
+    maximum_transport_attempts = page_bound * MAX_TRANSPORT_ATTEMPTS_PER_LOGICAL_ITEM
     if not live:
         if audit_accepted:
             raise ValueError("--audit-accepted requires --live")

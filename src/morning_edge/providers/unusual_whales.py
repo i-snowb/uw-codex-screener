@@ -267,15 +267,28 @@ class UnusualWhalesClient:
             raise ProviderSchemaError('active listings requires a status and object array')
         return EndpointResponse(endpoint, response)
 
-    def option_chain(self, ticker: str, *, as_of: date | str | None = None, greeks: bool = True) -> EndpointResponse:
-        """Get contract rows enriched with NBBO, IV, OI, volume, and Greeks.
+    def option_chain(self, ticker: str, *, as_of: date | str | None = None, greeks: bool = True,
+                     limit: int = 500, page: int | None = None) -> EndpointResponse:
+        """Get one enriched page, or the unpaginated symbol inventory.
 
         Official endpoint: ``/api/stock/{ticker}/option-chains``. The docs state
         that ``greeks=true`` changes the default symbol array into enriched rows.
         """
 
         endpoint = f"/api/stock/{_ticker(ticker)}/option-chains"
-        response = self._http.get_json(endpoint, params={"date": _market_date(as_of), "greeks": str(greeks).lower()})
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+            raise ValueError("option-chain limit must be between 1 and 500")
+        if page is not None and (isinstance(page, bool) or not isinstance(page, int) or page < 0):
+            raise ValueError("option-chain page must be a nonnegative integer")
+        params = {"date": _market_date(as_of), "greeks": str(greeks).lower()}
+        if page is not None:
+            params.update(limit=limit, page=page)
+        response = self._http.get_json(endpoint, params=params)
+        if not greeks:
+            data = response.data
+            if not isinstance(data, list) or any(not isinstance(item, str) or not item for item in data):
+                raise ProviderSchemaError(f'{endpoint}: expected option-symbol strings without greeks')
+            return EndpointResponse(endpoint, response)
         rows = require_list(response.payload, endpoint=endpoint)
         if greeks:
             # The documented schema uses ``expiry``/``type``. The live payload

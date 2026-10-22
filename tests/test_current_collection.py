@@ -103,7 +103,7 @@ class CurrentCollectionTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         root = Path(self.directory.name)
         self.store = SnapshotStore(root / "edge.sqlite")
-        self.budget = WeeklyRequestBudget(root / "usage.sqlite", weekly_cap=100, protected_reserve=10, clock=lambda: FETCHED)
+        self.budget = WeeklyRequestBudget(root / "usage.sqlite", weekly_cap=1000, protected_reserve=10, clock=lambda: FETCHED)
 
     def tearDown(self) -> None:
         self.budget.close()
@@ -118,7 +118,7 @@ class CurrentCollectionTests(unittest.TestCase):
         )
 
         self.assertTrue(report.preflight_passed)
-        self.assertEqual(24, report.max_transport_attempts)
+        self.assertEqual(171, report.max_transport_attempts)
         self.assertEqual(8, len(report.results))
         self.assertEqual(8, self.store.count())
         self.assertTrue(all(item.status is CurrentCaptureStatus.CAPTURED for item in report.results))

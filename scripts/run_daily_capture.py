@@ -30,6 +30,7 @@ from morning_edge.providers.unusual_whales import UnusualWhalesClient
 from morning_edge.store import SnapshotStore
 from run_intraday_refresh import _load_env
 from private_artifacts import ensure_private_directory
+from morning_edge.option_chain_collection import MAX_PAGES
 
 ET = ZoneInfo('America/New_York')
 
@@ -40,7 +41,7 @@ def plan(settings: Settings, now: datetime) -> dict:
     return {'status': 'PLANNED' if is_nyse_session(now.date()) else 'MARKET_CLOSED',
             'observed_at': now.isoformat(), 'expected_complete_session': latest_complete_session(now).isoformat(),
             'watchlist': list(settings.watchlist), 'benchmarks': list(BENCHMARKS),
-            'logical_requests': logical, 'maximum_transport_attempts': logical * 3,
+            'logical_requests': logical, 'maximum_transport_attempts': (logical + len(settings.watchlist) * (MAX_PAGES - 1)) * 3,
             'protected_reserve': 7000, 'credential_configured': bool(settings.provider_api_key),
             'network_called': False, 'recommendations_enabled': False}
 
@@ -54,7 +55,7 @@ def capture(settings: Settings, *, now: datetime, output: Path, app_root: Path,
                           'updated_at': datetime.now(ET).isoformat(), **extra}
         write_morning_run(status_path, value)
         print(json.dumps({"status": state, "stage": stage, "updated_at": value["updated_at"],
-            **{key: extra[key] for key in ("ticker", "dataset", "completed", "total") if key in extra}}, sort_keys=True), flush=True)
+            **{key: extra[key] for key in ("ticker", "dataset", "completed", "total", "chain_page") if key in extra}}, sort_keys=True), flush=True)
         return value
     if result['status'] == 'MARKET_CLOSED':
         return status('MARKET_CLOSED', 'calendar', 'No provider requests. Wait for the next NYSE session.')

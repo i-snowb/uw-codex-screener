@@ -52,7 +52,11 @@ class ArchiveSnapshot:
 
     @property
     def payload(self) -> Any:
-        return self.archive.load(self.content_hash)
+        value = self.archive.load(self.content_hash)
+        if self.dataset == 'option_chain':
+            from .option_chain_collection import expand_chain
+            return expand_chain(self.archive.connection, self.metadata, value)
+        return value
 
     @property
     def market_date(self) -> date:

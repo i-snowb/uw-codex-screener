@@ -165,18 +165,24 @@ def _latest_chain_snapshot(database: str | Path, ticker: str, cutoff_at: datetim
     connection = sqlite3.connect(f"file:{Path(database).resolve()}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:
-        row = connection.execute(
+        cursor = connection.execute(
             """
-            SELECT s.id, s.retrieved_at, p.content_json
+            SELECT s.id, s.retrieved_at, p.content_json, s.metadata_json
             FROM snapshots s JOIN raw_payloads p ON p.content_hash=s.raw_payload_hash
             WHERE s.symbol=? AND s.dataset='option_chain' AND s.as_of<=? AND s.retrieved_at<=?
-            ORDER BY s.retrieved_at DESC, s.id DESC LIMIT 1
+            ORDER BY s.retrieved_at DESC, s.id DESC
             """,
             (ticker, timestamp_text(cutoff_at), timestamp_text(cutoff_at)),
-        ).fetchone()
+        )
+        from .option_chain_collection import incomplete_chain, expand_chain
+        for row in cursor:
+            meta = json.loads(row['metadata_json'])
+            if not incomplete_chain(meta):
+                payload = expand_chain(connection, meta, json.loads(row['content_json']))
+                return (int(row['id']), timestamp_from_text(row['retrieved_at']), payload)
     finally:
         connection.close()
-    return (int(row["id"]), timestamp_from_text(row["retrieved_at"]), json.loads(row["content_json"])) if row else None
+    return None
 
 
 def _reference_contracts(database: str | Path, ticker: str, cutoff_at: datetime, latest_close: float | None) -> list[dict[str, Any]]:
