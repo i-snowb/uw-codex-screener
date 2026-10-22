@@ -24,6 +24,9 @@ from .providers.unusual_whales import (
 )
 from .store import SnapshotStore
 from .option_chain_collection import capture_chain, VERSION as CHAIN_VERSION, MAX_PAGES as CHAIN_MAX_PAGES
+from .clock import previous_nyse_session
+
+OHLC_SCOPE_VERSION = 'ohlc-inclusive-end-v1'
 
 
 class CoverageState(StrEnum):
@@ -139,7 +142,8 @@ class BackfillPlan:
                     "timeframe": "2Y",
                     "limit": 2500,
                     "anchor": "plan_end_date",
-                    "provider_end_date_offset_days": -1,
+                    "provider_end_date_offset_days": 0,
+                    "scope_version": OHLC_SCOPE_VERSION,
                 },
                 "flow_alerts": {
                     "new_york_session_bounds": True,
@@ -308,9 +312,10 @@ class BackfillStore:
                  AND json_extract(s.metadata_json, '$.requested_market_date') = ?
                  AND e.state IN ('collected', 'empty')
                  AND (? != 'option_chain' OR json_extract(s.metadata_json, '$.chain_coverage_version') = ?)
+                 AND (? != 'ohlc' OR json_extract(s.metadata_json, '$.ohlc_scope_version') = ?)
                ORDER BY e.id DESC
                LIMIT 1""",
-            (dataset, item.ticker, item.requested_date.isoformat(), dataset, CHAIN_VERSION),
+            (dataset, item.ticker, item.requested_date.isoformat(), dataset, CHAIN_VERSION, dataset, OHLC_SCOPE_VERSION),
         ).fetchone()
         if row is None or row["snapshot_id"] is None:
             return None
@@ -352,7 +357,7 @@ def _call(client: HistoricalClient, item: BackfillItem) -> EndpointResponse:
     if item.dataset == "ohlc":
         return client.ohlc(
             item.ticker, candle_size="1d", timeframe="2Y",
-            end_date=item.requested_date - timedelta(days=1) if item.requested_date else None,
+            end_date=item.requested_date,
             limit=2500,
         )
     if item.dataset == "earnings":
@@ -419,8 +424,9 @@ def _historical_scope_check(item: BackfillItem, rows: object) -> tuple[bool, str
         last_observed = max(observed_dates)
         if last_observed > item.requested_date:
             return False, f"ohlc_latest_date_{last_observed}_after_requested_{item.requested_date}"
-        if (item.requested_date - last_observed).days > 7:
-            return False, f"ohlc_latest_date_{last_observed}_too_far_before_requested_{item.requested_date}"
+        expected = previous_nyse_session(item.requested_date, include_current=True)
+        if last_observed != expected:
+            return False, f"ohlc_latest_date_{last_observed}_does_not_match_expected_{expected}"
         return True, None
     if item.dataset not in {"option_chain", "flow_alerts"}:
         return True, None
@@ -472,8 +478,7 @@ def _response_metadata(
     elif item.dataset == "ohlc":
         as_of_source = (
             "requested_market_date_at_utc_midnight; regular-session row dates validated; "
-            "provider OHLC end_date is sent one calendar day earlier because live probes "
-            "show the endpoint returns the next session"
+            "daily OHLC end_date is inclusive; latest regular row must match expected NYSE session"
         )
     elif item.dataset == "dealer_exposure" and is_empty:
         as_of_source = (
@@ -536,6 +541,7 @@ def _response_metadata(
         "gex_unusable_level_names": list(gex_unusable_levels) if item.dataset == "dealer_exposure" else None,
         "backfill_plan_id": item.plan_id,
         "backfill_item_key": item.item_key,
+        "ohlc_scope_version": OHLC_SCOPE_VERSION if item.dataset == 'ohlc' else None,
         "raw_only": True,
     }
 

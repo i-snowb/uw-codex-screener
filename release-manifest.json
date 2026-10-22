@@ -87,9 +87,9 @@
       "sha256": "f5b749123e303a5bfd530e34d9ab8f347c8b1c6785764e765750f76e48ff0801"
     },
     {
-      "bytes": 6343,
+      "bytes": 6758,
       "path": "docs/historical-backfill.md",
-      "sha256": "2dba5e9f186ae8ceb9c0494fcfe0855028ff0273cfe1f658061561246b504f69"
+      "sha256": "14dd64b6b990863f4065910db83d49a8bdddb991e56ba77b01094ae54ef8e759"
     },
     {
       "bytes": 2992,
@@ -307,9 +307,9 @@
       "sha256": "09ac40da3c74c560672d299a40f9aff19ecfc1f5a1942c0a53f5989e7496bb12"
     },
     {
-      "bytes": 66032,
+      "bytes": 66336,
       "path": "src/morning_edge/backfill.py",
-      "sha256": "330d10ff673f6a7f4e26f1127a3930025117dbcb7769e5bb964c9194fa8e45a1"
+      "sha256": "8ab101832e1071e74749366081f00637fea6617cfd4670c85d6c204c7f33838a"
     },
     {
       "bytes": 1570,
@@ -537,9 +537,9 @@
       "sha256": "e8eb48146ae80ceedb4941d566808f0131e44306867e995742785e8635caac4d"
     },
     {
-      "bytes": 31235,
+      "bytes": 32243,
       "path": "tests/test_backfill.py",
-      "sha256": "3973a4c1d2e920aab7a5bbc91aea0c5e20e297f810b79fa73fc9c0145440d830"
+      "sha256": "a630dc1734fc3a8822bc2ce5c38e6d89944c2557609638e4334708da1dd46cc9"
     },
     {
       "bytes": 8717,

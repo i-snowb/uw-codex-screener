@@ -85,6 +85,12 @@ The OHLC backfill requests a `2Y` window with the provider's 2,500-row limit.
 This matches the API Basic historical entitlement and yields about 500 regular
 daily sessions for established symbols. Newly listed symbols naturally have
 shorter histories.
+Daily bars use the requested end date without an offset. The latest regular bar
+must match that date's last NYSE session; a one-session lag is not complete
+coverage. The API's UTC spillover note for intraday candles does not justify
+subtracting a day from daily-bar requests. This policy is versioned as
+`ohlc-inclusive-end-v1`; older offset captures are retained but not reused as
+verified endpoint-date coverage.
 
 `dark_pool` uses the provider's `older_than` cursor, persists every raw page,
 overlaps boundary timestamps, and de-duplicates by `tracking_id`. A short or

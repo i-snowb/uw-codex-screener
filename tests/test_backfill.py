@@ -217,6 +217,19 @@ class BackfillTests(unittest.TestCase):
         self.assertEqual("complete", stored.envelope.metadata["pagination_status"])
         self.assertEqual("verified_requested_date_and_complete_pages", stored.envelope.metadata["historical_scope_status"])
 
+    def test_daily_ohlc_end_date_is_inclusive_and_requires_latest_session(self) -> None:
+        plan=make_plan(provider='unusual_whales',start_date=date(2026,8,21),end_date=date(2026,8,21),tickers=('QCOM',),datasets=('ohlc',))
+        client=FakeHistoricalClient()
+        result=collect(client=client,snapshots=self.store,plan=plan,max_requests=1,audit_accepted=True)
+        self.assertEqual([('ohlc','QCOM:2026-08-21')],client.calls)
+        self.assertEqual(1,result['state_counts']['collected'])
+        class Lagged(FakeHistoricalClient):
+            def ohlc(self,*args,**kwargs):
+                return response('/api/stock/QCOM/ohlc/1d',[{'date':'2026-08-20','market_time':'r'}])
+        other=make_plan(provider='unusual_whales',start_date=date(2026,8,20),end_date=date(2026,8,21),tickers=('ARM',),datasets=('ohlc',))
+        result=collect(client=Lagged(),snapshots=self.store,plan=other,max_requests=1,audit_accepted=True)
+        self.assertEqual(1,result['state_counts']['scope_unverified'])
+
     def test_reuses_terminal_evidence_across_overlapping_plans(self) -> None:
         first = make_plan(
             provider="unusual_whales",
