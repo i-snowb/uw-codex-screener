@@ -347,9 +347,9 @@
       "sha256": "6a0658126a0ce49dc8a4fc36b8142604278ddfc45cdd52e573f1520649da4f65"
     },
     {
-      "bytes": 43630,
+      "bytes": 42906,
       "path": "src/morning_edge/daily.py",
-      "sha256": "bbcdc1581cf7bbcbbcd158432386d08b8b2b417c28953ffd0926d30efb274791"
+      "sha256": "a099bf426821db939490d3ca547124397499fc09cf3d1977603544eea621d16a"
     },
     {
       "bytes": 12449,
@@ -677,9 +677,9 @@
       "sha256": "0ae3c3d7fa20cd3c358d49b1d7129ae0183d4f4412e608a1277dc64defe71ba0"
     },
     {
-      "bytes": 5417,
+      "bytes": 6036,
       "path": "tests/test_option_chain_pagination.py",
-      "sha256": "8e0ff510a60285f6913f74626a3ea8676cba7efea424657052c93d2ffe9fe698"
+      "sha256": "4b056b61a456d1fcf555dbc7ff7470986b7a6ab1b18a415d144f123261d003c4"
     },
     {
       "bytes": 1427,

@@ -20,15 +20,16 @@ def rows(start, count, tape='2026-10-21T19:59:00Z'):
 
 
 class Pages:
-    def __init__(self, pages):
+    def __init__(self, pages, at=AT):
         self.pages = pages
         self.calls = []
+        self.at = at
 
     def option_chain(self, ticker, *, as_of=None, greeks=True, page=None, limit=500):
         page = page or 0
         self.calls.append(page)
         raw = RawResponse(provider='unusual_whales',method='GET',url='https://api.unusualwhales.com/api/stock/QCOM/option-chains',
-            status_code=200,headers={},body=b'',fetched_at=AT+timedelta(seconds=page),attempts=1,rate_limit=RateLimitMetadata())
+            status_code=200,headers={},body=b'',fetched_at=self.at+timedelta(seconds=page),attempts=1,rate_limit=RateLimitMetadata())
         return EndpointResponse('/api/stock/QCOM/option-chains',JsonResponse(payload={'data':self.pages[page]},raw=raw))
 
 
@@ -103,6 +104,14 @@ class ChainPaginationTests(unittest.TestCase):
         meta = dict(result.snapshot.envelope.metadata,chain_completed_at=(AT-timedelta(seconds=1)).isoformat())
         with self.assertRaises(ValueError):
             expand_chain(self.store.connection,meta,result.snapshot.envelope.payload)
+
+    def test_later_retrieved_history_does_not_replace_latest_market_session(self):
+        current = self.capture([rows(0,1,'2026-10-22T19:59:00Z')])
+        capture_chain(client=Pages([rows(0,2)],at=AT+timedelta(seconds=100)),snapshots=self.store,
+            ticker='QCOM',requested_date=date(2026,10,21),metadata={'capture_mode':'historical_chain','requested_market_date':'2026-10-21'})
+        selected=_latest_chain_snapshot(self.path,'QCOM',AT+timedelta(seconds=200))
+        self.assertEqual(current.snapshot.id,selected[0])
+        self.assertEqual(1,len(selected[2]['data']))
 
 
 if __name__ == '__main__':
